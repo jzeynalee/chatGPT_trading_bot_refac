@@ -1,0 +1,13 @@
+pandas
+numpy
+requests
+websockets
+plotly
+flask
+jinja2
+beautifulsoup4
+matplotlib
+scikit-learn
+python-telegram-bot
+tweepy
+linkedin-api

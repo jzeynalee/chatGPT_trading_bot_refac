@@ -1,0 +1,86 @@
+{
+    "SYMBOLS": [
+        "btc_usdt",
+        "eth_usdt",
+        "xrp_usdt",
+        "bnb_usdt",
+        "sol_usdt",
+        "doge_usdt",
+        "ada_usdt",
+        "trx_usdt",
+        "link_usdt",
+        "sui_usdt",
+        "avax_usdt",
+        "arb_usdt",
+        "matic_usdt",
+        "op_usdt",
+        "near_usdt",
+        "cro_usdt",
+        "gno_usdt",
+        "apt_usdt",
+        "xmr_usdt",
+        "kava_usdt",
+        "ton_usdt",
+        "mnt_usdt",
+        "blast_usdt",
+        "algo_usdt",
+        "rune_usdt",
+        "osmo_usdt",
+        "rsk_usdt",
+        "xin_usdt",
+        "celo_usdt",
+        "ftm_usdt",
+        "eos_usdt",
+        "xtz_usdt",
+        "neo_usdt",
+        "ont_usdt",
+        "metis_usdt",
+        "leo_usdt"
+    ],
+    
+    "TIMEFRAMES": [
+        "1min",
+        "5min",
+        "15min",
+        "1h",
+        "4h"
+    ],
+
+    "WEBSOCKET_TIMEFRAME_CODES": {
+        "1min": "1min",
+        "5min": "5min",
+        "15min": "15min",
+        "1h": "1hr",
+        "4h": "4hr"
+    },
+
+    "REST_TIMEFRAME_CODES": {
+        "1min": "Minute1",
+        "5min": "minute5",
+        "15min": "minute15",
+        "1h": "hour1",
+        "4h": "hour4"
+    },
+
+    "TELEGRAM": {
+        "token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "chat_id": "YOUR_TELEGRAM_CHAT_ID"
+    },
+
+    "TWITTER": {
+        "api_key": "YOUR_TWITTER_API_KEY",
+        "api_secret": "YOUR_TWITTER_API_SECRET",
+        "access_token": "YOUR_TWITTER_ACCESS_TOKEN",
+        "access_secret": "YOUR_TWITTER_ACCESS_SECRET"
+    },
+
+    "LINKEDIN": {
+        "username": "your_email@example.com",
+        "password": "your_password"
+    },
+
+    "LBANK_API":{
+        "api_key":"lban_api_key_here",
+        "api_secret":"lban_api_secret_here"
+    }
+}
