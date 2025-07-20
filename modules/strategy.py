@@ -1,4 +1,4 @@
-class IchimokuDayStrategy:
+class strategyEngine:
     def __init__(self, multi_df):
         """
         multi_df = {
