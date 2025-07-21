@@ -1,44 +1,80 @@
+````python
 """
 message_handler.py
 ==================
-
-Robust handler for inbound WebSocket messages.
-
-Improvements over the original implementation
----------------------------------------------
-* **Input validation** – ignores malformed / unexpected messages.
-* **Structured logging** – debug‑logs the entire message before
-  processing; errors are logged with stack traces.
-* **Graceful failure** – exceptions raised by downstream handlers do not
-  crash the WebSocket loop; they are caught and logged.
-* **Testability hook** – `process_fn` and `signal_check_fn` can be
-  injected (handy for unit tests).
+Robust handler for inbound WebSocket *ticker* messages with **strict schema
+validation** and detailed logging.  Designed for easy unit‑testing via
+injection of custom processing functions.
 """
-
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List
 
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# helpers
+# Validation helpers
 # ---------------------------------------------------------------------------
+_REQUIRED_TOP_LEVEL_KEYS: List[str] = [
+    "subscribe",  # channel identifier, e.g. "ticker.bt_usdt"
+    "tick",       # nested price data payload
+]
 
-def _is_ticker_message(data: Dict[str, Any]) -> bool:
-    """Return *True* if the message is a *ticker* subscription payload."""
-    return (
-        isinstance(data, dict)
-        and "subscribe" in data
-        and isinstance(data["subscribe"], str)
-        and "ticker" in data["subscribe"]
-    )
+_REQUIRED_TICK_KEYS: List[str] = [
+    "time", "open", "high", "low", "close", "volume"
+]
+
+
+def _is_ticker_channel(channel: str) -> bool:
+    """Returns *True* if the subscribe string looks like a ticker channel."""
+    return channel.startswith("ticker.")
+
+
+def _validate_schema(payload: Dict[str, Any]) -> bool:
+    """Strictly validate the incoming payload schema.
+
+    Checks:
+    1. Required top‑level keys exist.
+    2. `subscribe` value appears to be a ticker channel.
+    3. `tick` is a dict containing all required price keys.
+    4. Numerical fields are *coercible* to `float` (not e.g. ``None`` or
+       empty strings).
+    """
+    # ---- top level --------------------------------------------------------
+    for key in _REQUIRED_TOP_LEVEL_KEYS:
+        if key not in payload:
+            logger.warning("❌ Missing key '%s' in payload: %s", key, payload)
+            return False
+
+    subscribe_val = payload["subscribe"]
+    if not isinstance(subscribe_val, str) or not _is_ticker_channel(subscribe_val):
+        logger.warning("❌ Invalid subscribe channel: %s", subscribe_val)
+        return False
+
+    tick = payload["tick"]
+    if not isinstance(tick, dict):
+        logger.warning("❌ 'tick' must be dict: %s", payload)
+        return False
+
+    # ---- tick keys --------------------------------------------------------
+    for key in _REQUIRED_TICK_KEYS:
+        if key not in tick:
+            logger.warning("❌ Missing tick key '%s' in payload: %s", key, payload)
+            return False
+        # value type check — allow int/float/str‑numeric
+        try:
+            float(tick[key])
+        except (TypeError, ValueError):
+            logger.warning("❌ Non‑numeric tick['%s'] value: %s", key, tick[key])
+            return False
+
+    return True
 
 # ---------------------------------------------------------------------------
-# public API
+# Public API
 # ---------------------------------------------------------------------------
 
 async def handle_message(
@@ -49,46 +85,41 @@ async def handle_message(
     process_fn: Callable[[Dict[str, Any], str, dict], Awaitable[None]] | None = None,
     signal_check_fn: Callable[[], None] | None = None,
 ) -> None:
-    """Handle a single WebSocket message.
+    """Process a single incoming WebSocket message.
 
     Parameters
     ----------
-    data : dict
-        The *already decoded* JSON message.
-    df_store : dict
-        A symbol‑keyed store of OHLCV DataFrames.
-    order_books : dict, optional
-        Order‑book snapshots keyed by symbol (may be *None* if not used).
-    process_fn : coroutine, optional
-        Custom coroutine to process tick data. Falls back to
-        ``core.signal_handler.process_tick_data`` if omitted.
-    signal_check_fn : callable, optional
-        Function that checks + dispatches signals after every tick. Falls
-        back to ``core.tick_handler.check_signals``.
+    data
+        Decoded JSON message from the WebSocket.
+    df_store
+        Per‑symbol OHLCV DataFrame cache.
+    order_books
+        Optional per‑symbol order book snapshots.
+    process_fn, signal_check_fn
+        Dependency‑injection hooks for unit‑testing.
     """
-    # --------------------------------------------------------------------
-    # choose default dependencies lazily (helps with import cycles)
-    # --------------------------------------------------------------------
+    # Lazy‑import defaults to avoid circular imports during tests
     if process_fn is None:
-        from core.signal_handler import process_tick_data as process_fn  # noqa: WPS433 (dyn‑import)
+        from core.signal_handler import process_tick_data as process_fn  # noqa: WPS433
     if signal_check_fn is None:
-        from core.tick_handler import check_signals as signal_check_fn  # noqa: WPS433 (dyn‑import)
+        from core.tick_handler import check_signals as signal_check_fn  # noqa: WPS433
 
     # --------------------------------------------------------------------
-    # validate + short‑circuit
+    # Validation & early exit
     # --------------------------------------------------------------------
-    if not _is_ticker_message(data):
-        logger.debug("⏭️  Non‑ticker message skipped: %s", data)
+    if not _validate_schema(data):
+        logger.debug("⏭️ Invalid / non‑ticker payload skipped.")
         return
 
     symbol = data["subscribe"].split(".")[-1]
-    logger.debug("📥 Incoming ticker (%s): %s", symbol, data)
+    logger.debug("📥 Valid ticker (%s): %s", symbol, data)
 
     # --------------------------------------------------------------------
-    # main processing with robust error handling
+    # Main processing with fault‑tolerance
     # --------------------------------------------------------------------
     try:
         await process_fn(data, symbol, df_store)
         signal_check_fn()
     except Exception:  # noqa: BLE001 (broad but logged)
-        logger.exception("[DATA HANDLER ERROR] %s", symbol)
+        logger.exception("[MESSAGE_HANDLER] processing error for %s", symbol)
+````
