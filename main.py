@@ -1,12 +1,19 @@
-
 import asyncio
+import os
+from dotenv import load_dotenv
+import pandas as pd
 
 from core.initialization import initialize_components, load_configuration
 from core.message_handler import handle_message
-
 from tradePlanner import TradePlanner
 from modules.indicator import IndicatorCalculator
-import pandas as pd
+from utils.logger import setup_logger
+
+# Load environment variables
+load_dotenv(dotenv_path="config.env")
+
+# Setup logger
+logger = setup_logger(__name__)
 
 async def run_bot() -> None:
     # Initialize all components and configuration
@@ -17,10 +24,8 @@ async def run_bot() -> None:
     ws_client = components['websocket_client']
     ws_client.set_message_callback(handle_message)
 
-    logger = components['logger']
     trader = components['trader']
-    symbol_data_provider = components['data_provider']  # assumes a historical/kline provider is part of components
-
+    symbol_data_provider = components['data_provider']
     trade_planner = TradePlanner()
 
     # Start the application
@@ -31,9 +36,8 @@ async def run_bot() -> None:
             await ws_client.connect()                
             # If we get here, it means the connection was closed gracefully or max retries reached
             if not ws_client.is_running or ws_client.max_retries_reached():
-                break          
-            
-            # Ensure all cleanup happens even during keyboard interrupt 
+                break
+
             cleanup_successful = False
             while not cleanup_successful:
                 cleanup_successful = await ws_client.graceful_shutdown()
@@ -49,7 +53,7 @@ async def run_bot() -> None:
         # Example hook for SL/TP planning after signal detection
         # Replace this section with your actual signal routing logic
         try:
-            signal = components.get("latest_signal")  # You need to manage how signals are passed/stored
+            signal = components.get("latest_signal")
             if signal:
                 symbol = signal['symbol']
                 entry_price = signal['entry']
@@ -61,7 +65,7 @@ async def run_bot() -> None:
                     df = IndicatorCalculator(df).add_swing_points().calculate_ma(50).df
                     data_by_tf[tf] = df
 
-                fib_levels = {}  # populate this if needed from your strategy
+                fib_levels = {}
 
                 sl_tp_plan = trade_planner.generate_sl_tp_plan(
                     entry_price=entry_price,
@@ -89,7 +93,7 @@ def main() -> None:
 
     try:
         loop.run_until_complete(run_bot())
-    finally:    
+    finally:   
         # Gather all pending tasks and cancel them properly
         pending = asyncio.all_tasks(loop=loop)
         if pending:
@@ -98,7 +102,6 @@ def main() -> None:
                 asyncio.gather(*pending, return_exceptions=True)
             )
         loop.close()
-
 
 if __name__ == "__main__":
     main()
