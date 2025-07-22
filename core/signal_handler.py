@@ -1,69 +1,56 @@
+from __future__ import annotations
+from datetime import datetime
+from typing import Any, Callable, Dict
 
-async def process_tick_data(data, symbol, df_store):
-    
-     tf = "1min"  # Can be made dynamic if needed
-    
-     tick_price = float(data['tick']['latest'])
-     ts = datetime.utcfromtimestamp(data['ts'] / 1000)
-     
-     df = df_store[symbol][tf]
-     
-     if df['timestamp'].iloc[-1] < ts:
-         
-         new_row = df.iloc[-1].copy()
-         new_row.update({
-             'timestamp': ts,
-             'close_price': tick_price 
-         })
-         
-         df_store[symbol][tf] = update_dataframe(df, new_row)
-         
-         processed_df = calculate_indicators(df)
-         
-         signal = detect_signal(processed_df, symbol, tick_price)
-         
-         if signal: 
-             await handle_new_signal(signal)
+from pydantic import ValidationError
+from models.signal import TradeSignal
+from utils.logger import setup_logger
 
-def update_dataframe(df, new_row):
-    
-     updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True) 
-     
-     return updated_df.iloc[-100:]  # Keep last 100 rows only
+logger = setup_logger(__name__)
 
+async def handle_new_signal(
+    signal: Dict[str, Any],
+    *,
+    dispatcher=None,
+    format_fn: Callable[[TradeSignal], str] | None = None,
+    trade_planner=None,
+) -> None:
+    """Validate/enrich (SLTP) with Pydantic and dispatch."""
+    from notifiers.SignalDispatcher import SignalDispatcher
 
-def calculate_indicators(df): 
-    
-     from modules.indicator import IndicatorCalculator 
-     
-     return (
-         IndicatorCalculator(df)
-            .calculate_macd()
-            .calculate_ichimoku()
-            .get_df() 
-      )
+    needed = {"stop_loss","take_profit_1","take_profit_2","take_profit_3"}
+    if not needed.issubset(signal):
+        if trade_planner is None:
+            from modules.trade_planner import TradePlanner
+            trade_planner = TradePlanner()
+        sltp = trade_planner.plan_sl_tp(signal["symbol"], float(signal["price"]))
+        signal.update(sltp)
+        signal.setdefault("timestamp", datetime.utcnow().timestamp())
 
-def detect_signal(df, symbol, price): 
-    
-      from modules.strategy import IchimokuDayStrategy  
-      
-      result = IchimokuDayStrategy(df)  
-      
-      if result:  
-          return {
-              "symbol": symbol,
-              "entry": price,
-              "direction": result  
-          }
+    try:
+        sig_model = TradeSignal(**signal)
+    except ValidationError as ve:
+        logger.warning("Signal validation failed: %s", ve)
+        return
 
-async def handle_new_signal(signal):  
-      
-      atr_value = calculate_atr(signal)  
-      
-      trade_plan = create_trade_plan(signal, atr_value)  
-      
-      await execute_trade(trade_plan)  
-      
-      log_trade(trade_plan)
+    dispatcher = dispatcher or SignalDispatcher()
+    format_fn = format_fn or _default_format
 
-# ... helper functions ...
+    try:
+        msg = format_fn(sig_model)
+        await dispatcher.dispatch(msg)
+        logger.info("🚀 Dispatched signal for %s", sig_model.symbol)
+    except Exception:
+        logger.exception("Failed to dispatch signal: %s", sig_model.model_dump())
+
+def _default_format(sig: TradeSignal) -> str:
+    ts = datetime.utcfromtimestamp(sig.timestamp).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return (
+        f"#TRADE\n"
+        f"Symbol: {sig.symbol}\n"
+        f"Direction: {sig.direction.upper()}\n"
+        f"Entry: {sig.price}\n"
+        f"SL: {sig.stop_loss}\n"
+        f"TP1: {sig.take_profit_1} | TP2: {sig.take_profit_2} | TP3: {sig.take_profit_3}\n"
+        f"Time: {ts}"
+    )
