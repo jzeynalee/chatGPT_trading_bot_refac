@@ -1,2 +1,2 @@
-pydantic>=2.5
+pydantic<2
 mypy>=1.8
