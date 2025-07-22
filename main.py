@@ -5,7 +5,7 @@ import pandas as pd
 
 from core.initialization import initialize_components, load_configuration
 from core.message_handler import handle_message
-from tradePlanner import TradePlanner
+from modules.trade_planner import TradePlanner
 from modules.indicator import IndicatorCalculator
 from utils.logger import setup_logger
 
