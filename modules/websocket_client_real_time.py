@@ -6,9 +6,9 @@ import time
 import pandas as pd
 from collections import defaultdict, deque
 
-from my_modules.indicator import IndicatorCalculator
-from my_modules.strategy import StrategyEngine
-from my_modules.utils import fetch_initial_kline
+from modules.indicator import IndicatorCalculator
+from modules.strategy import StrategyEngine
+from modules.utils import fetch_initial_kline
 from secrets_manager import SecretsManager
 
 class WebSocketClient:
