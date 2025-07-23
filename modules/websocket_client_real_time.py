@@ -7,7 +7,7 @@ import pandas as pd
 from collections import defaultdict, deque
 
 from modules.indicator import IndicatorCalculator
-from modules.strategy import StrategyEngine
+from modules.strategy import strategyEngine
 from modules.utils import fetch_initial_kline
 from secrets_manager import SecretsManager
 
