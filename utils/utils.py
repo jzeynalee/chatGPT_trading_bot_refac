@@ -6,21 +6,44 @@ import json
 import time
 import requests
 import pandas as pd
+import logging
+from typing import Optional, Dict, Any
 
 def load_config(path="config.json"):
     with open(path, "r") as f:
         return json.load(f)
 
-def fetch_initial_kline(symbol, interval, size=200, rest_code_map=None):
-    if rest_code_map is None:
-        raise ValueError("rest_code_map is required to convert timeframe")
+
+def fetch_initial_kline(
+    symbol: str,
+    interval: str,
+    size: int = 200,
+    rest_code_map: Optional[Dict[str, str]] = None,
+    config: Optional[Dict[str, Any]] = None,
+    logger: Optional[logging.Logger] = None,
+    ) -> pd.DataFrame:
+    # Try to resolve mapping if not provided
+    if rest_code_map is None and config is not None:
+        rest_code_map = (
+            config.get("rest_code_map")
+            or config.get("REST_TIMEFRAME_CODES")
+            or {}
+        )
+
+    if not rest_code_map:
+        if logger:
+            logger.warning("No rest_code_map/REST_TIMEFRAME_CODES; returning empty DataFrame.")
+        return pd.DataFrame()
 
     if interval not in rest_code_map:
-        raise ValueError(f"Unknown interval '{interval}' for REST API")
+        if logger:
+            logger.error("Unknown interval '%s' for REST API", interval)
+        return pd.DataFrame()
 
     rest_interval = rest_code_map[interval]
+
     base_url = "https://api.lbank.info/v2/kline.do"
-    print('INterval: ', interval)
+
     minutes = {
         "4h":int(4*60),
         "1h":int(1*60),

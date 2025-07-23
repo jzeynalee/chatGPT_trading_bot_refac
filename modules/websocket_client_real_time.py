@@ -25,12 +25,13 @@ class WebSocketClient:
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self.rest_code_map = (
-            config.get('rest_code_map')
-            or config.get('REST_TIMEFRAME_CODES')
-            or config.get('REST_TIMEFRAME_CODE', {})
+            config.get("rest_code_map")
+            or config.get("REST_TIMEFRAME_CODES")
             or {}
         )
-        
+        if not self.rest_code_map and self.logger:
+            self.logger.warning("No rest_code_map / REST_TIMEFRAME_CODES in config; timeframe conversion may fail.")
+
         self._message_callback = message_callback
 
         # Original hardcoded URL kept as default, but allow override

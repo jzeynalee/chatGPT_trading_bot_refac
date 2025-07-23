@@ -57,11 +57,12 @@ def load_configuration(env_path: str = "config.env") -> Dict:
             rest_codes[tf] = val
 
 
-    return {
+    conf: Dict[str, object] = {
         "SYMBOLS": [s for s in symbols.split(",") if s],
         "TIMEFRAMES": [t for t in timeframes.split(",") if t],
         "WEBSOCKET_TIMEFRAME_CODES": ws_codes,
         "REST_TIMEFRAME_CODES": rest_codes,
+
         "TELEGRAM": {
             "token": os.getenv("TELEGRAM_TOKEN"),
             "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
@@ -80,11 +81,18 @@ def load_configuration(env_path: str = "config.env") -> Dict:
             "api_key": os.getenv("LBANK_API_API_KEY"),
             "api_secret": os.getenv("LBANK_API_API_SECRET"),
             "base_url": os.getenv("LBANK_API_BASE_URL", "https://api.lbank.info"),
+            "websocket_url": os.getenv("LBANK_API_WEBSOCKET_URL", ""),  # optional
         },
         "ACCOUNT": {
             "equity": float(os.getenv("ACCOUNT_EQUITY", "0") or 0),
         },
+        "WS_MAX_RETRIES": int(os.getenv("WS_MAX_RETRIES", "5")),
     }
+
+    # ---- Alias to satisfy WebSocketClient expecting `rest_code_map`
+    conf["rest_code_map"] = conf.get("REST_TIMEFRAME_CODES", {})
+
+    return conf
 
 
 def initialize_components(
