@@ -82,5 +82,9 @@
     "LBANK_API":{
         "api_key":"lban_api_key_here",
         "api_secret":"lban_api_secret_here"
+    },
+    
+    "ACCOUNT":{
+        "equity":1000
     }
 }

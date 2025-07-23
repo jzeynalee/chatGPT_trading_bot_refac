@@ -22,7 +22,7 @@ async def run_bot() -> None:
 
     # Set up WebSocket client with dependencies injected
     ws_client = components['websocket_client']
-    ws_client.set_message_callback(handle_message)
+    #ws_client.set_message_callback(handle_message)
 
     trader = components['trader']
     symbol_data_provider = components['data_provider']

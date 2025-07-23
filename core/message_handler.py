@@ -1,4 +1,3 @@
-````python
 """
 message_handler.py
 ==================
@@ -122,4 +121,3 @@ async def handle_message(
         signal_check_fn()
     except Exception:  # noqa: BLE001 (broad but logged)
         logger.exception("[MESSAGE_HANDLER] processing error for %s", symbol)
-````

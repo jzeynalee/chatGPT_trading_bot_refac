@@ -26,58 +26,42 @@ All paths, credentials, and runtime options are sourced exclusively from
 environment variables defined in *config.env*.
 """
 
+from __future__ import annotations
+
 import os
+import inspect
 from typing import Dict, Optional
 
 from dotenv import load_dotenv
 
-from modules.websocket_client_real_time import WebSocketClient
-from modules.strategy import TradePlanner
-from modules.trader import Trader
 from utils.logger import setup_logger
+from modules.websocket_client_real_time import WebSocketClient
+from modules.trader import Trader
+from modules.trade_planner import TradePlanner
 
 
 def load_configuration(env_path: str = "config.env") -> Dict:
-    """
-    Load configuration values from an ``.env`` file.
-
-    The function parses primitive values (strings, lists) straight from
-    the environment, and also reconstructs nested dictionaries for
-    timeframe code mappings and API credentials.
-
-    Parameters
-    ----------
-    env_path : str, optional
-        Filesystem path to the ``.env`` file.  Defaults to ``"config.env"``.
-
-    Returns
-    -------
-    dict
-        A hierarchical configuration dictionary ready to be passed to
-        other components.
-    """
-    # Populate environment from the supplied dotenv file
+    """Load settings from an .env-style file and return a structured config dict."""
     load_dotenv(dotenv_path=env_path)
 
-    symbols = os.getenv("SYMBOLS_VALUE", "").split(",")
-    timeframes = os.getenv("TIMEFRAMES_VALUE", "").split(",")
+    symbols = os.getenv("SYMBOLS_VALUE", "")
+    timeframes = os.getenv("TIMEFRAMES_VALUE", "")
 
-    # --- timeframe code maps -------------------------------------------------
-    ws_timeframe_codes, rest_timeframe_codes = {}, {}
-    for key, value in os.environ.items():
+    ws_codes, rest_codes = {}, {}
+    for key, val in os.environ.items():
         if key.startswith("WEBSOCKET_TIMEFRAME_CODES_"):
             tf = key.replace("WEBSOCKET_TIMEFRAME_CODES_", "").lower()
-            ws_timeframe_codes[tf] = value
+            ws_codes[tf] = val
         elif key.startswith("REST_TIMEFRAME_CODES_"):
             tf = key.replace("REST_TIMEFRAME_CODES_", "").lower()
-            rest_timeframe_codes[tf] = value
+            rest_codes[tf] = val
+
 
     return {
-        "SYMBOLS": symbols,
-        "TIMEFRAMES": timeframes,
-        "WEBSOCKET_TIMEFRAME_CODES": ws_timeframe_codes,
-        "REST_TIMEFRAME_CODES": rest_timeframe_codes,
-        # Credentials / tokens -------------------------------------------------
+        "SYMBOLS": [s for s in symbols.split(",") if s],
+        "TIMEFRAMES": [t for t in timeframes.split(",") if t],
+        "WEBSOCKET_TIMEFRAME_CODES": ws_codes,
+        "REST_TIMEFRAME_CODES": rest_codes,
         "TELEGRAM": {
             "token": os.getenv("TELEGRAM_TOKEN"),
             "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
@@ -95,6 +79,10 @@ def load_configuration(env_path: str = "config.env") -> Dict:
         "LBANK_API": {
             "api_key": os.getenv("LBANK_API_API_KEY"),
             "api_secret": os.getenv("LBANK_API_API_SECRET"),
+            "base_url": os.getenv("LBANK_API_BASE_URL", "https://api.lbank.info"),
+        },
+        "ACCOUNT": {
+            "equity": float(os.getenv("ACCOUNT_EQUITY", "0") or 0),
         },
     }
 
@@ -103,44 +91,56 @@ def initialize_components(
     config: Dict,
     overrides: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
-    """
-    Instantiate and wire‑up runtime components.
-
-    Parameters
-    ----------
-    config : dict
-        Configuration dictionary produced by :func:`load_configuration`.
-    overrides : dict[str, object], optional
-        A mapping of *component_name → custom_instance* allowing tests to
-        inject mocks:
-        ``initialize_components(cfg, overrides={"logger": DummyLogger()})``
-
-    Returns
-    -------
-    dict[str, object]
-        Dictionary exposing constructed components:
-
-        - ``logger``
-        - ``strategy``  (TradePlanner)
-        - ``trader``    (Trader)
-        - ``websocket_client``
-        - ``data_provider`` (if supplied via *overrides*)
-    """
     overrides = overrides or {}
-    ### Use the caller‑supplied logger if there is one; otherwise, create a new module‑scoped logger.    logger = overrides.get("logger") or setup_logger(__name__)
-    strategy = overrides.get("strategy") or TradePlanner()
-    trader = overrides.get("trader") or Trader(config=config, logger=logger)
-    websocket_client = overrides.get("websocket_client") or WebSocketClient(
-        config=config,
-        trader=trader,
-        strategy=strategy,
-        logger=logger,
-    )
-    data_provider = overrides.get("data_provider")  # may be None
 
-    # Log lifecycle -----------------------------------------------------------
+    # 1) Logger first
+    logger = overrides.get("logger") or setup_logger(__name__)
+
+    # 2) Strategy / TradePlanner
+    strategy = overrides.get("strategy")
+    if strategy is None:
+        # if your TradePlanner doesn't need equity, this still works
+        try:
+            equity = config.get("ACCOUNT", {}).get("equity", 0.0)
+            strategy = TradePlanner(equity=equity)
+        except TypeError:
+            strategy = TradePlanner()
+
+    # 3) Trader
+    trader = overrides.get("trader")
+    if trader is None:
+        api_cfg = config.get("LBANK_API", {})
+        trader = Trader(
+            api_key=api_cfg.get("api_key", ""),
+            secret_key=api_cfg.get("api_secret", ""),
+            base_url=api_cfg.get("base_url", "https://api.lbank.info"),
+            logger=logger,
+        )
+
+    # 4) Optional provider (define BEFORE building kwargs)
+    data_provider = overrides.get("data_provider")
+
+    # 5) WebSocket client (filter args by signature)
+    if "websocket_client" in overrides and overrides["websocket_client"] is not None:
+        websocket_client = overrides["websocket_client"]
+    else:
+        import inspect
+        # ⬇️ Lazy import to avoid circular import issues
+        from core.message_handler import handle_message
+        candidate_args = {
+            "config": config,
+            "logger": logger,
+            "trader": trader,
+            "strategy": strategy,
+            "data_provider": data_provider,
+            "message_callback": handle_message,
+        }
+        sig = inspect.signature(WebSocketClient.__init__)
+        ws_kwargs = {k: v for k, v in candidate_args.items() if k in sig.parameters}
+        websocket_client = WebSocketClient(**ws_kwargs)
+
     logger.info("✅ Logger initialized.")
-    logger.info("✅ Strategy initialized.")
+    logger.info("✅ Strategy initialized: %s", strategy.__class__.__name__)
     logger.info("✅ Trader initialized.")
     logger.info("✅ WebSocketClient initialized.")
 

@@ -1,0 +1,3 @@
+[2025-07-23 12:35:32,584] [ERROR] Unexpected error: 'WebSocketClient' object has no attribute 'is_running'
+[2025-07-23 14:34:18,054] [ERROR] Connection failed: rest_code_map is required to convert timeframe
+[2025-07-23 14:34:18,054] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
