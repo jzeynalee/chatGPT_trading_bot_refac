@@ -79,6 +79,15 @@ class WebSocketClient:
     # ----------------------------------------------------------------------
     # Public helpers / DI hooks
     # ----------------------------------------------------------------------
+
+    def _tf_ws(self, tf: str) -> str:
+        """Map canonical tf (e.g. '1h') to WS code; fallback to tf itself."""
+        return self.timeframe_mapping.get(tf, tf)
+
+    def _tf_rest(self, tf: str) -> str:
+        """Map canonical tf to REST code ('hour1', etc.)."""
+        return self.rest_code_map.get(tf, tf)
+
     def set_message_callback(self, cb: Callable[..., asyncio.Future]) -> None:
         """Register an external coroutine to process each inbound WS message."""
         self._message_callback = cb
@@ -141,7 +150,7 @@ class WebSocketClient:
     async def subscribe_to_channels(self):
         for symbol in self.symbols:
             for tf in self.timeframes:
-                ws_tf = tf  # already WS style
+                ws_tf = self._tf_ws(tf)  # already WS style
                 kbar_msg = {
                     "action": "subscribe",
                     "subscribe": "kbar",
@@ -160,10 +169,28 @@ class WebSocketClient:
                 await self.prefill_data(symbol, tf)
 
     async def prefill_data(self, symbol: str, timeframe: str):
-        rest_tf = self.timeframe_mapping.get(timeframe)
+        rest_tf = self._tf_rest(timeframe)
+        if not rest_tf:
+            if self.logger:
+                self.logger.warning("No REST code for timeframe %s; skipping prefill", timeframe)
+        return
+
+        if self.logger:
+            self.logger.info("📥 Prefilling %s %s via REST code %s", symbol, timeframe, rest_tf)
+
+        self.logger.debug("Calling fetch_initial_kline for %s %s", symbol, timeframe)
         if rest_tf:
-            df = fetch_initial_kline(symbol, rest_tf, size=200)
+            df = fetch_initial_kline(
+                symbol, 
+                rest_tf, 
+                size=200,
+                rest_code_map=self.rest_code_map,
+                logger=self.logger
+                )
             self.df_store[(symbol, timeframe)] = deque(df.to_dict('records'), maxlen=200)
+        if timeframe in ("1h", "4h"):
+            self.logger.warning("Prefill reached for %s %s", symbol, timeframe)
+
 
     # ----------------------------------------------------------------------
     # Message handling

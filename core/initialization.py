@@ -29,6 +29,7 @@ environment variables defined in *config.env*.
 from __future__ import annotations
 
 import os
+import logging
 import inspect
 from typing import Dict, Optional
 
@@ -58,8 +59,8 @@ def load_configuration(env_path: str = "config.env") -> Dict:
 
 
     conf: Dict[str, object] = {
-        "SYMBOLS": [s for s in symbols.split(",") if s],
-        "TIMEFRAMES": [t for t in timeframes.split(",") if t],
+        "SYMBOLS": [s.strip().lower() for s in symbols.split(",") if s.strip()],
+        "TIMEFRAMES": [t.strip().lower() for t in timeframes.split(",") if t.strip()],
         "WEBSOCKET_TIMEFRAME_CODES": ws_codes,
         "REST_TIMEFRAME_CODES": rest_codes,
 
@@ -91,6 +92,10 @@ def load_configuration(env_path: str = "config.env") -> Dict:
 
     # ---- Alias to satisfy WebSocketClient expecting `rest_code_map`
     conf["rest_code_map"] = conf.get("REST_TIMEFRAME_CODES", {})
+    
+    log = logging.getLogger(__name__)
+    log.debug("Parsed TIMEFRAMES: %s", conf["TIMEFRAMES"])
+    log.debug("Parsed SYMBOLS: %s", conf["SYMBOLS"])
 
     return conf
 
