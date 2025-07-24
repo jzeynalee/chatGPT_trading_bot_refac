@@ -10,8 +10,8 @@ _DEFAULT_BACKUPS = int(os.getenv("LOG_BACKUPS", "5"))    # keep 5 rotated files
 
 
 def setup_logger(name: str,
-                 level: str | int = _DEFAULT_LEVEL,
-                 log_file: str | None = _DEFAULT_FILE,
+                 level: str or int = _DEFAULT_LEVEL,
+                 log_file: str or None = _DEFAULT_FILE,
                  to_console: bool = True) -> logging.Logger:
     """
     Create/get a logger with both console and rotating-file handlers.
