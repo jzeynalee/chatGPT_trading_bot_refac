@@ -54,11 +54,11 @@ def fetch_initial_kline(
     base_url = "https://api.lbank.info/v2/kline.do"
 
     minutes = {
-        "4h":int(4*60),
-        "1h":int(1*60),
-        "15min":int(15),
-        "5min":int(5),
-        "1min":int(1)
+        "4h":240,
+        "1h":60,
+        "15min":15,
+        "5min":5,
+        "1min":1
         }
 
     end_time = int(time.time())

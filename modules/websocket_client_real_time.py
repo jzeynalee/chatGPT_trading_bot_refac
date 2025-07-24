@@ -98,29 +98,34 @@ class WebSocketClient:
     # ----------------------------------------------------------------------
     # Main run loop
     # ----------------------------------------------------------------------
+    
     async def run(self) -> None:
         """Reconnect loop with backoff until stopped or retries exhausted."""
         while not self.max_retries_reached():
             try:
                 await self.connect()
-                # If connect returns without exception, break (graceful close)
-                break
+                break  # graceful close
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
+            except Exception as exc:
                 self._retries += 1
-                self.logger.error("Connection failed (%s/%s): %s",
-                                  self._retries, self._max_retries, e)
+                self.logger.warning("Reconnect #%s after error: %s", self._retries, exc)
                 await asyncio.sleep(min(5 * self._retries, 30))
         self.is_running = False
 
     async def connect(self):
         """Establish WS, subscribe, spawn tasks, and keep alive."""
+        if not self._ws_url:
+            raise RuntimeError("WebSocket URL not configured.")
         self.is_running = True
         try:
-            async with websockets.connect(self.url, ping_interval=None) as ws:
+            async with websockets.connect(self._ws_url, ping_interval=None) as ws:
                 self.ws = ws
-                self.logger.info("✅ Connected to WS: %s", self.url)
+                if self.logger:
+                    self.logger.info(f"✅ Connected to WS: {self._ws_url}")
+
+                # ← spawn the heartbeat task here
+                self._hb_task = asyncio.create_task(self._heartbeat())
 
                 await self.subscribe_to_channels()
 
@@ -137,6 +142,14 @@ class WebSocketClient:
     async def graceful_shutdown(self) -> bool:
         """Stop loops and close socket."""
         self.is_running = False
+        # cancel heartbeat if running
+        if hasattr(self, "_hb_task"):
+            self._hb_task.cancel()
+            try:
+                await self._hb_task
+            except asyncio.CancelledError:
+                pass
+
         if self.ws:
             try:
                 await self.ws.close()
@@ -169,7 +182,7 @@ class WebSocketClient:
                 await self.prefill_data(symbol, tf)
 
     async def prefill_data(self, symbol: str, timeframe: str):
-        rest_tf = self._tf_rest(timeframe)
+        rest_tf = self._tf_rest(timeframe.lower())
         if not rest_tf:
             if self.logger:
                 self.logger.warning("No REST code for timeframe %s; skipping prefill", timeframe)
@@ -199,9 +212,29 @@ class WebSocketClient:
         try:
             async for msg in self.ws:
                 await self.queue.put(msg)
-        except Exception as e:
-            self.logger.error("Listen error: %s", e)
+        except websockets.exceptions.ConnectionClosed as e:   # <— catch both OK/Error
+            if self.logger:
+                self.logger.warning("WS closed unexpectedly: code=%s reason=%s",
+                                    getattr(e, 'code', '?'), 
+                                    getattr(e, 'reason', '?'))
+        
+                self.logger.warning("WS closed unexpectedly: code=%s reason=%s", getattr(e, "code", "?"), getattr(e, "reason", "?"))
+        except Exception:
+             if self.logger:
+                self.logger.exception("Listen loop crashed")
+        finally:
+            self.is_running = False
 
+    async def _heartbeat(self, interval: int = 25):
+        '''manual heartbeats every ~25s'''
+        while self.is_running and self.ws:
+            try:
+                await self.ws.ping()
+            except Exception as e:
+                if self.logger:
+                    self.logger.warning("Heartbeat ping failed: %s", e)
+                break
+            await asyncio.sleep(interval)
     async def handle_ping_pong(self, message: dict):
         ping_value = message.get("ping")
         if ping_value:
