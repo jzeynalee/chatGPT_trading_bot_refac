@@ -1,17 +1,1 @@
-[2025-07-23 12:35:32,584] [ERROR] Unexpected error: 'WebSocketClient' object has no attribute 'is_running'
-[2025-07-23 14:34:18,054] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 14:34:18,054] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 15:07:30,680] [ERROR] Connection failed: 
-[2025-07-23 15:07:30,680] [ERROR] Unexpected error: 
-[2025-07-23 15:30:13,383] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 15:30:13,383] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 15:32:47,322] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 15:32:47,322] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 15:46:50,445] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 15:46:50,446] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 15:51:26,762] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 15:51:26,763] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 15:53:04,389] [ERROR] Connection failed: rest_code_map is required to convert timeframe
-[2025-07-23 15:53:04,389] [ERROR] Unexpected error: rest_code_map is required to convert timeframe
-[2025-07-23 16:33:48,654] [ERROR] Connection failed: 
-[2025-07-23 16:33:48,654] [ERROR] Unexpected error: 
+[2025-07-24 12:09:29,171] [ERROR] Listen error: no close frame received or sent
