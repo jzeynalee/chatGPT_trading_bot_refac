@@ -181,7 +181,8 @@ class WebSocketClient:
                 order_msg = {
                     "action": "subscribe",
                     "subscribe": "depth",
-                    "pair": symbol
+                    "pair": symbol,
+                    "depth": int(self.config.get("DEPTH_LEVEL", 50))
                 }
                 await self.ws.send(json.dumps(order_msg))
 
@@ -192,7 +193,7 @@ class WebSocketClient:
         if not rest_tf:
             if self.logger:
                 self.logger.warning("No REST code for timeframe %s; skipping prefill", timeframe)
-        return
+            return
 
         if self.logger:
             self.logger.info("📥 Prefilling %s %s via REST code %s", symbol, timeframe, rest_tf)
@@ -277,12 +278,14 @@ class WebSocketClient:
                 elif action == 'depth':
                     self.order_books[symbol] = data  # process order book if needed
 
-            # External callback hook
-            if self._message_callback:
-                try:
-                    await self._message_callback(msg, self.df_store, self.order_books)
-                except Exception as cb_exc:
-                    self.logger.exception("External message callback failed: %s", cb_exc)
+                        # External callback hook (ticker only)
+            if self._message_callback and isinstance(msg, dict):
+                sub = msg.get("subscribe", "")
+                if isinstance(sub, str) and sub.startswith("ticker."):
+                    try:
+                        await self._message_callback(msg, self.df_store, self.order_books)
+                    except Exception as cb_exc:
+                        self.logger.exception("External message callback failed: %s", cb_exc)
 
         except Exception as e:
             self.logger.error("Message handling failed: %s\nMessage: %s", e, message)

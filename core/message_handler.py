@@ -8,7 +8,7 @@ injection of custom processing functions.
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from utils.logger import setup_logger
 
@@ -79,10 +79,10 @@ def _validate_schema(payload: Dict[str, Any]) -> bool:
 async def handle_message(
     data: Dict[str, Any],
     df_store: dict,
-    order_books: dict | None = None,
+    order_books: Optional[dict] = None,
     *,
     process_fn: Callable[[Dict[str, Any], str, dict], Awaitable[None]] | None = None,
-    signal_check_fn: Callable[[], None] | None = None,
+    signal_check_fn: Optional[Callable[[], None]] = None,
 ) -> None:
     """Process a single incoming WebSocket message.
 
@@ -96,15 +96,17 @@ async def handle_message(
         Optional per‑symbol order book snapshots.
     process_fn, signal_check_fn
         Dependency‑injection hooks for unit‑testing.
-    # Lazy‑import defaults to avoid circular imports during tests
-    if process_fn is None:
-        from core.signal_handler import process_tick_data as process_fn  # noqa: WPS433
-    if signal_check_fn is None:
-        from core.tick_handler import check_signals as signal_check_fn  # noqa: WPS433
+    
     """
     # --------------------------------------------------------------------
     # Validation & early exit
     # --------------------------------------------------------------------
+    # Early skip non-ticker or error payloads
+    subscribe_val = data.get("subscribe", "")
+    if not isinstance(subscribe_val, str) or not subscribe_val.startswith("ticker."):
+        logger.debug("⏭️ Non-ticker payload skipped: %s", data)
+        return
+
     if not _validate_schema(data):
         logger.debug("⏭️ Invalid / non‑ticker payload skipped.")
         return
