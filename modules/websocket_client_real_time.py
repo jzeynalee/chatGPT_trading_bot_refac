@@ -33,6 +33,12 @@ class WebSocketClient:
             self.logger.warning("No rest_code_map / REST_TIMEFRAME_CODES in config; timeframe conversion may fail.")
 
         self._message_callback = message_callback
+        self.url = (
+            config.get("LBANK_API", {}).get("websocket_url")
+            or config.get("WEBSOCKET_URL")
+            or "wss://www.lbkex.net/ws/V2/"
+        )
+        self._ws_url = self.url
 
         # Original hardcoded URL kept as default, but allow override
         self.url = config.get("WEBSOCKET_URL", "wss://www.lbkex.net/ws/V2/")
