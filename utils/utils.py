@@ -22,24 +22,33 @@ def fetch_initial_kline(
     config: Optional[Dict[str, Any]] = None,
     logger: Optional[logging.Logger] = None,
     ) -> pd.DataFrame:
-    # Try to resolve mapping if not provided
-    if rest_code_map is None and config is not None:
-        rest_code_map = (
-            config.get("rest_code_map")
-            or config.get("REST_TIMEFRAME_CODES")
-            or {}
-        )
+    # 1) Resolve rest_code_map if not provided
+    if rest_code_map is None:
+        if config is not None:
+            rest_code_map = (
+                config.get("rest_code_map")
+                or config.get("REST_TIMEFRAME_CODES")
+                or {}
+            )
+        if not rest_code_map:
+            # Build directly from env as a last resort
+            rest_code_map = {
+                k.replace("REST_TIMEFRAME_CODES_", "").lower(): v
+                for k, v in os.environ.items()
+                if k.startswith("REST_TIMEFRAME_CODES_")
+            }
 
+    # 2) If still empty, just warn & return empty DF
     if not rest_code_map:
         if logger:
-            logger.warning("No rest_code_map/REST_TIMEFRAME_CODES; returning empty DataFrame.")
+            logger.warning("No rest_code_map / REST_TIMEFRAME_CODES found; returning empty DataFrame.")
         return pd.DataFrame()
 
     if interval not in rest_code_map:
         if logger:
             logger.error("Unknown interval '%s' for REST API", interval)
         return pd.DataFrame()
-
+        
     rest_interval = rest_code_map[interval]
 
     base_url = "https://api.lbank.info/v2/kline.do"

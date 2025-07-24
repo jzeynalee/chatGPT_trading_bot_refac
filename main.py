@@ -29,7 +29,7 @@ async def run_bot() -> None:
     trade_planner = TradePlanner()
 
     # Start the application
-    logger.info("🔄 Starting Trading Bot...")
+    logger.info(f"✅ Starting Trading Bot...")
 
     while True:
         try:
@@ -44,7 +44,7 @@ async def run_bot() -> None:
                 break
 
         except KeyboardInterrupt:
-            logger.info("🛑 Received shutdown signal...")
+            logger.info(f"✅ Received shutdown signal...")
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
@@ -79,7 +79,7 @@ async def run_bot() -> None:
                 if 'error' not in best_plan:
                     sl = best_plan['sl']
                     tp = best_plan['tp']
-                    logger.info(f"✅ Executing trade for {symbol} with SL: {sl}, TP: {tp} using method {best_plan['method']}")
+                    logger.info("✅ Executing trade for {symbol} with SL: {sl}, TP: {tp} using method {best_plan['method']}")
                     trader.place_order(symbol=symbol, entry=entry_price, sl=sl, tp=tp)
                 else:
                     logger.warning(f"No valid SL/TP plan found for {symbol}. Trade skipped.")

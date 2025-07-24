@@ -182,7 +182,7 @@ class WebSocketClient:
             await self.ws.send(json.dumps(pong_msg))
             self.logger.debug("Responded to ping with pong: %s", ping_value)
 
-    async def handle_message(self, message: str):
+    async def _handle_ws_message(self, message: str):
         try:
             msg = json.loads(message)
             await self.handle_ping_pong(msg)
@@ -206,7 +206,7 @@ class WebSocketClient:
                     )
                     signal = self.strategy.evaluate(df)
                     if signal:
-                        self.logger.info("%s-%s Signal: %s", symbol, kbar_tf, signal)
+                        self.logger.info(f"{symbol}-{kbar_tf} Signal: {signal}")
 
                 elif action == 'depth':
                     self.order_books[symbol] = data  # process order book if needed
@@ -224,4 +224,4 @@ class WebSocketClient:
     async def process_message_queue(self):
         while True:
             msg = await self.queue.get()
-            await self.handle_message(msg)
+            await self._handle_ws_message(msg)

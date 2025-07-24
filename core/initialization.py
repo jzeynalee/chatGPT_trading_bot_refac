@@ -147,10 +147,10 @@ def initialize_components(
         ws_kwargs = {k: v for k, v in candidate_args.items() if k in sig.parameters}
         websocket_client = WebSocketClient(**ws_kwargs)
 
-    logger.info("✅ Logger initialized.")
+    logger.info(f"✅ Logger initialized.")
     logger.info("✅ Strategy initialized: %s", strategy.__class__.__name__)
-    logger.info("✅ Trader initialized.")
-    logger.info("✅ WebSocketClient initialized.")
+    logger.info(f"✅ Trader initialized.")
+    logger.info(f"✅ WebSocketClient initialized.")
 
     return {
         "logger": logger,

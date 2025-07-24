@@ -96,13 +96,12 @@ async def handle_message(
         Optional per‑symbol order book snapshots.
     process_fn, signal_check_fn
         Dependency‑injection hooks for unit‑testing.
-    """
     # Lazy‑import defaults to avoid circular imports during tests
     if process_fn is None:
         from core.signal_handler import process_tick_data as process_fn  # noqa: WPS433
     if signal_check_fn is None:
         from core.tick_handler import check_signals as signal_check_fn  # noqa: WPS433
-
+    """
     # --------------------------------------------------------------------
     # Validation & early exit
     # --------------------------------------------------------------------
