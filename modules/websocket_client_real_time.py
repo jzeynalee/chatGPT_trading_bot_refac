@@ -205,7 +205,22 @@ class WebSocketClient:
         depth_level = int(self.config.get("DEPTH_LEVEL", 50))
         for symbol in self.symbols:
             for tf in self.timeframes:
-                ws_tf = self.timeframe_mapping.get(tf, tf)
+                # ------------------------------------------------------
+                # 1) PREFILL (use canonical key for the REST helper)
+                # ------------------------------------------------------
+                await self.prefill_data(symbol, tf)
+
+                # ------------------------------------------------------
+                # 2) BUILD WS MESSAGES
+                # ------------------------------------------------------
+                # Use the *env‑provided* WS code.  Fallback to REST code,
+                # and only finally to the canonical key if nothing exists.
+                #ws_tf = (
+                #    self.timeframe_mapping.get(tf)      # e.g. "5min", "1hr"
+                #    or self.rest_code_map.get(tf)       # e.g. "minute5", "hour1"
+                #    or tf                               # last‑ditch: "5m"
+                #)
+                ws_tf = self.timeframe_mapping.get(tf)
 
                 # kbar
                 kbar_msg = json.dumps({
