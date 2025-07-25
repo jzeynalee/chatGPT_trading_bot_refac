@@ -24,9 +24,9 @@ def load_configuration(env_path: str = "config.env") -> Dict:
     """
     Load settings from an .env-style file and return a structured config dict.
     """
-    my_config_items = load_dotenv(dotenv_path=env_path)
-    
-    log.debug("my_config_items:   %s", list(my_config_items.keys()))
+    log = logging.getLogger(__name__)
+    load_dotenv(dotenv_path=env_path)  
+    log.debug("my_config_items:   %s", os.environ.items())
 
     symbols_raw = os.getenv("SYMBOLS_VALUE", "")
     timeframes_raw = os.getenv("TIMEFRAMES_VALUE", "")
@@ -34,7 +34,7 @@ def load_configuration(env_path: str = "config.env") -> Dict:
     # Build timeframe code maps from env like REST_TIMEFRAME_CODES_1H=hour1
     ws_codes: Dict[str, str] = {}
     rest_codes: Dict[str, str] = {}
-    for key, val in my_config_items:
+    for key, val in os.environ.items():
         if key.startswith("WEBSOCKET_TIMEFRAME_CODES_"):
             raw_ws_tf = key.replace("WEBSOCKET_TIMEFRAME_CODES_", "").lower()
             tf = normalize_tf(raw_ws_tf) 
