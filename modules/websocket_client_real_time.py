@@ -1,16 +1,52 @@
+"""
+modules/websocket_client_real_time.py
+-------------------------------------
+WebSocket client that:
+- Subscribes to kbar & depth streams
+- Prefills OHLCV via REST
+- Keeps internal df_store & order_books
+- Forwards ONLY ticker.* messages to core.message_handler via callback
+- Handles reconnects, heartbeats, graceful shutdown
+"""
+
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-import time
 from collections import defaultdict, deque
-from typing import Any, Callable, Optional, Dict
+from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
 import websockets
 
-from modules.indicator import IndicatorCalculator
-from modules.strategy import strategyEngine  # original import kept
 from utils.utils import fetch_initial_kline
+from modules.indicator import IndicatorCalculator
+
+# Optional helper to unify timeframe keys; if you don't have this file,
+# either create it or inline a minimal normalize_tf.
+try:
+    from utils.timeframe import normalize_tf
+except ImportError:  # fallback
+    def normalize_tf(tf: str) -> str:
+        t = tf.lower()
+        aliases = {
+            "1m": ["1m", "1min", "minute1"],
+            "5m": ["5m", "5min", "minute5"],
+            "15m": ["15m", "15min", "minute15"],
+            "30m": ["30m", "30min", "minute30"],
+            "1h": ["1h", "h1", "hour1"],
+            "4h": ["4h", "h4", "hour4"],
+            "8h": ["8h", "hour8"],
+            "12h": ["12h", "hour12"],
+            "1d": ["1d", "day1"],
+            "1w": ["1w", "week1"],
+            "1mth": ["1mth", "month1"],
+        }
+        for canon, alts in aliases.items():
+            if t in alts:
+                return canon
+        return t
 
 
 class WebSocketClient:
@@ -19,31 +55,35 @@ class WebSocketClient:
         config: Dict[str, Any],
         logger: Optional[logging.Logger] = None,
         message_callback: Optional[Callable[..., asyncio.Future]] = None,
+        trader: Any = None,
         strategy: Any = None,
+        data_provider: Any = None,
     ):
-        # ---- config & misc -------------------------------------------------
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
-        self.rest_code_map = (
-            config.get("rest_code_map")
-            or config.get("REST_TIMEFRAME_CODES")
-            or {}
-        )
-        if not self.rest_code_map and self.logger:
-            self.logger.warning("No rest_code_map / REST_TIMEFRAME_CODES in config; timeframe conversion may fail.")
-
         self._message_callback = message_callback
+
+        # URL
         self.url = (
             config.get("LBANK_API", {}).get("websocket_url")
             or config.get("WEBSOCKET_URL")
             or "wss://www.lbkex.net/ws/V2/"
         )
-        self._ws_url = self.url
+        self._ws_url = self.url  # some legacy code may still use this attr
 
-        # Original hardcoded URL kept as default, but allow override
-        self.url = config.get("WEBSOCKET_URL", "wss://www.lbkex.net/ws/V2/")
+        # Timeframe maps
+        self.timeframe_mapping = (
+            config.get("TIMEFRAME_MAPPING")
+            or config.get("WEBSOCKET_TIMEFRAME_CODES", {})
+            or {}
+        )
+        self.rest_code_map = (
+            config.get("rest_code_map")
+            or config.get("REST_TIMEFRAME_CODES")
+            or {}
+        )
 
-        # Fallbacks for various key cases
+        # Symbols / TFs
         self.symbols = (
             config.get("symbols")
             or config.get("SYMBOLS")
@@ -54,59 +94,41 @@ class WebSocketClient:
             or config.get("TIMEFRAMES")
             or []
         )
-        self.timeframe_mapping = (
-            config.get("timeframe_mapping")
-            or config.get("TIMEFRAME_MAPPING")
-            or config.get("WEBSOCKET_TIMEFRAME_CODES", {})
-            or {}
-        )
 
-        # Data stores
+        # Optional deps
+        self.trader = trader
+        self.strategy = strategy
+        self.data_provider = data_provider
+
+        # Internal stores
         self.df_store: Dict[tuple, deque] = defaultdict(lambda: deque(maxlen=200))
         self.order_books: Dict[str, dict] = defaultdict(dict)
+
+        # Async plumbing
         self.queue: asyncio.Queue = asyncio.Queue()
-        self.ws = None
+        self.ws: Optional[websockets.WebSocketClientProtocol] = None
 
-        # Strategy (DI or build)
-        if strategy is not None:
-            self.strategy = strategy
-        else:
-            # try to satisfy possible multi_df parameter
-            try:
-                self.strategy = strategyEngine(multi_df=self.df_store)
-            except TypeError:
-                self.strategy = strategyEngine()
+        self.is_running = False
+        self._retries = 0
+        self._max_retries = int(config.get("WS_MAX_RETRIES", 5))
 
-        # Runtime state for reconnection logic
-        self.is_running: bool = False
-        self._retries: int = 0
-        self._max_retries: int = int(config.get("WS_MAX_RETRIES", 5))
+        # Task handles for cleanup
+        self._hb_task: Optional[asyncio.Task] = None
+        self._listener_task: Optional[asyncio.Task] = None
+        self._consumer_task: Optional[asyncio.Task] = None
 
-    # ----------------------------------------------------------------------
-    # Public helpers / DI hooks
-    # ----------------------------------------------------------------------
-
-    def _tf_ws(self, tf: str) -> str:
-        """Map canonical tf (e.g. '1h') to WS code; fallback to tf itself."""
-        return self.timeframe_mapping.get(tf, tf)
-
-    def _tf_rest(self, tf: str) -> str:
-        """Map canonical tf to REST code ('hour1', etc.)."""
-        return self.rest_code_map.get(tf, tf)
-
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
     def set_message_callback(self, cb: Callable[..., asyncio.Future]) -> None:
-        """Register an external coroutine to process each inbound WS message."""
+        """Register/replace the coroutine to process inbound ticker messages."""
         self._message_callback = cb
 
     def max_retries_reached(self) -> bool:
         return self._retries >= self._max_retries
 
-    # ----------------------------------------------------------------------
-    # Main run loop
-    # ----------------------------------------------------------------------
-    
     async def run(self) -> None:
-        """Reconnect loop with backoff until stopped or retries exhausted."""
+        """Reconnect loop with simple backoff."""
         while not self.max_retries_reached():
             try:
                 await self.connect()
@@ -119,178 +141,188 @@ class WebSocketClient:
                 await asyncio.sleep(min(5 * self._retries, 30))
         self.is_running = False
 
-    async def connect(self):
-        """Establish WS, subscribe, spawn tasks, and keep alive."""
+    async def connect(self) -> None:
         if not self._ws_url:
             raise RuntimeError("WebSocket URL not configured.")
         self.is_running = True
-        try:
-            async with websockets.connect(self._ws_url, ping_interval=None) as ws:
-                self.ws = ws
-                if self.logger:
-                    self.logger.info(f"✅ Connected to WS: {self._ws_url}")
 
-                # ← spawn the heartbeat task here
-                self._hb_task = asyncio.create_task(self._heartbeat())
+        async with websockets.connect(self._ws_url, ping_interval=None) as ws:
+            self.ws = ws
+            self.logger.info("✅ Connected to WS: %s", self._ws_url)
 
-                await self.subscribe_to_channels()
+            # Heartbeat
+            self._hb_task = asyncio.create_task(self._heartbeat())
 
-                # Spawn consumers
-                asyncio.create_task(self.listen_messages())
-                asyncio.create_task(self.process_message_queue())
+            await self.subscribe_to_channels()
 
-                while self.is_running:
-                    await asyncio.sleep(1)
-        except Exception as e:
-            self.logger.error("Connection failed: %s", e)
-            raise
+            # Spawn listener & consumer
+            self._listener_task = asyncio.create_task(self.listen_messages())
+            self._consumer_task = asyncio.create_task(self.process_message_queue())
+
+            # Keep this coroutine alive until shutdown
+            while self.is_running:
+                await asyncio.sleep(1)
 
     async def graceful_shutdown(self) -> bool:
-        """Stop loops and close socket."""
+        """Stop loops and close resources cleanly."""
         self.is_running = False
-        # cancel heartbeat if running
-        if hasattr(self, "_hb_task"):
-            self._hb_task.cancel()
-            try:
-                await self._hb_task
-            except asyncio.CancelledError:
-                pass
+
+        # Unblock consumer
+        await self.queue.put(None)
+
+        # Cancel tasks
+        for task in (self._hb_task, self._listener_task, self._consumer_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
         if self.ws:
             try:
                 await self.ws.close()
             except Exception:
                 pass
+
         return True
 
-    # ----------------------------------------------------------------------
-    # Subscriptions / Prefill
-    # ----------------------------------------------------------------------
-    async def subscribe_to_channels(self):
-        for symbol in self.symbols:
-            for tf in self.timeframes:
-                ws_tf = self._tf_ws(tf)  # already WS style
-                kbar_msg = {
-                    "action": "subscribe",
-                    "subscribe": "kbar",
-                    "kbar": ws_tf,
-                    "pair": symbol
-                }
-                await self.ws.send(json.dumps(kbar_msg))
-
-                order_msg = {
-                    "action": "subscribe",
-                    "subscribe": "depth",
-                    "pair": symbol,
-                    "depth": int(self.config.get("DEPTH_LEVEL", 50))
-                }
-                await self.ws.send(json.dumps(order_msg))
-
-                await self.prefill_data(symbol, tf)
-
-    async def prefill_data(self, symbol: str, timeframe: str):
-        rest_tf = self._tf_rest(timeframe.lower())
-        if not rest_tf:
-            if self.logger:
-                self.logger.warning("No REST code for timeframe %s; skipping prefill", timeframe)
-            return
-
-        if self.logger:
-            self.logger.info("📥 Prefilling %s %s via REST code %s", symbol, timeframe, rest_tf)
-
-        self.logger.debug("Calling fetch_initial_kline for %s %s", symbol, timeframe)
-        if rest_tf:
-            df = fetch_initial_kline(
-                symbol, 
-                rest_tf, 
-                size=200,
-                rest_code_map=self.rest_code_map,
-                logger=self.logger
-                )
-            self.df_store[(symbol, timeframe)] = deque(df.to_dict('records'), maxlen=200)
-        if timeframe in ("1h", "4h"):
-            self.logger.warning("Prefill reached for %s %s", symbol, timeframe)
-
-
-    # ----------------------------------------------------------------------
-    # Message handling
-    # ----------------------------------------------------------------------
-    async def listen_messages(self):
-        try:
-            async for msg in self.ws:
-                await self.queue.put(msg)
-        except websockets.exceptions.ConnectionClosed as e:   # <— catch both OK/Error
-            if self.logger:
-                self.logger.warning("WS closed unexpectedly: code=%s reason=%s",
-                                    getattr(e, 'code', '?'), 
-                                    getattr(e, 'reason', '?'))
-        
-                self.logger.warning("WS closed unexpectedly: code=%s reason=%s", getattr(e, "code", "?"), getattr(e, "reason", "?"))
-        except Exception:
-             if self.logger:
-                self.logger.exception("Listen loop crashed")
-        finally:
-            self.is_running = False
-
-    async def _heartbeat(self, interval: int = 25):
-        '''manual heartbeats every ~25s'''
+    # ------------------------------------------------------------------ #
+    # Internals
+    # ------------------------------------------------------------------ #
+    async def _heartbeat(self, interval: int = 25) -> None:
+        """Send periodic pings to keep the connection alive."""
         while self.is_running and self.ws:
             try:
                 await self.ws.ping()
             except Exception as e:
-                if self.logger:
-                    self.logger.warning("Heartbeat ping failed: %s", e)
+                self.logger.warning("Heartbeat ping failed: %s", e)
                 break
             await asyncio.sleep(interval)
-    async def handle_ping_pong(self, message: dict):
-        ping_value = message.get("ping")
-        if ping_value:
-            pong_msg = {"action": "pong", "pong": ping_value}
-            await self.ws.send(json.dumps(pong_msg))
-            self.logger.debug("Responded to ping with pong: %s", ping_value)
 
-    async def _handle_ws_message(self, message: str):
+    async def subscribe_to_channels(self) -> None:
+        depth_level = int(self.config.get("DEPTH_LEVEL", 50))
+        for symbol in self.symbols:
+            for tf in self.timeframes:
+                ws_tf = self.timeframe_mapping.get(tf, tf)
+
+                # kbar
+                await self.ws.send(json.dumps({
+                    "action": "subscribe",
+                    "subscribe": "kbar",
+                    "kbar": ws_tf,
+                    "pair": symbol
+                }))
+
+                # depth
+                await self.ws.send(json.dumps({
+                    "action": "subscribe",
+                    "subscribe": "depth",
+                    "pair": symbol,
+                    "depth": depth_level
+                }))
+
+                # Prefill REST data for this TF
+                await self.prefill_data(symbol, tf)
+
+    async def prefill_data(self, symbol: str, timeframe: str) -> None:
+        canonical_tf = normalize_tf(timeframe)
+        rest_tf = self.rest_code_map.get(canonical_tf)
+
+        if not rest_tf:
+            self.logger.warning("No REST code for timeframe %s; skipping prefill", timeframe)
+            return
+
+        self.logger.debug("Prefill %s %s (REST:%s)", symbol, canonical_tf, rest_tf)
+
+        df = fetch_initial_kline(
+            symbol=symbol,
+            interval=canonical_tf,
+            size=200,
+            rest_code_map=self.rest_code_map,
+            logger=self.logger,
+        )
+        self.df_store[(symbol, timeframe)] = deque(df.to_dict("records"), maxlen=200)
+
+    async def listen_messages(self) -> None:
+        """Read raw frames from WS and push to queue."""
+        import websockets
         try:
-            msg = json.loads(message)
-            await self.handle_ping_pong(msg)
+            async for raw in self.ws:
+                await self.queue.put(raw)
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.warning("WS closed unexpectedly: code=%s reason=%s",
+                                getattr(e, 'code', '?'), getattr(e, 'reason', '?'))
+        except Exception:
+            self.logger.exception("Listen loop crashed")
+        finally:
+            self.is_running = False
+            # ensure queue consumer can exit
+            await self.queue.put(None)
 
-            if 'data' in msg:
-                data = msg['data']
-                action = msg.get('subscribe')
-                symbol = data.get('symbol')
+    async def process_message_queue(self) -> None:
+        """Consume raw websocket frames from the queue and handle them."""
+        while self.is_running:
+            try:
+                raw = await self.queue.get()
+                if raw is None:  # sentinel to exit
+                    break
+                await self._handle_ws_message(raw)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self.logger.exception("Queue consumer crashed: %s", exc)
 
-                if action == 'kbar':
-                    kbar_tf = msg.get('kbar')
-                    key = (symbol, kbar_tf)
-                    self.df_store[key].append(data)
-                    df = pd.DataFrame(self.df_store[key])
-                    df = (
-                        IndicatorCalculator(df)
-                        .calculate_rsi()
-                        .calculate_macd()
-                        .calculate_bollinger()
-                        .get_df()
-                    )
-                    signal = self.strategy.evaluate(df)
-                    if signal:
-                        self.logger.info(f"{symbol}-{kbar_tf} Signal: {signal}")
+    async def _handle_ws_message(self, raw_msg: str) -> None:
+        """Internal per-message handler (NOT the core handler)."""
+        try:
+            msg = json.loads(raw_msg)
+        except Exception:
+            self.logger.warning("Malformed WS payload: %s", raw_msg)
+            return
 
-                elif action == 'depth':
-                    self.order_books[symbol] = data  # process order book if needed
+        # Ping / pong
+        ping_val = msg.get("ping")
+        if ping_val:
+            await self.ws.send(json.dumps({"action": "pong", "pong": ping_val}))
+            return
 
-                        # External callback hook (ticker only)
-            if self._message_callback and isinstance(msg, dict):
-                sub = msg.get("subscribe", "")
-                if isinstance(sub, str) and sub.startswith("ticker."):
-                    try:
-                        await self._message_callback(msg, self.df_store, self.order_books)
-                    except Exception as cb_exc:
-                        self.logger.exception("External message callback failed: %s", cb_exc)
+        # Server error payloads
+        if msg.get("status") == "error":
+            self.logger.warning("WS error: %s", msg.get("message"))
+            return
 
-        except Exception as e:
-            self.logger.error("Message handling failed: %s\nMessage: %s", e, message)
+        subscribe_type = msg.get("subscribe", "")
+        data = msg.get("data", {})
 
-    async def process_message_queue(self):
-        while True:
-            msg = await self.queue.get()
-            await self._handle_ws_message(msg)
+        # Handle kbar & depth locally
+        if subscribe_type == "kbar":
+            symbol = data.get("symbol")
+            kbar_tf = msg.get("kbar")
+            canonical_tf = normalize_tf(kbar_tf or "")
+            key = (symbol, canonical_tf)
+            self.df_store[key].append(data)
+
+            # Local indicator calc (optional)
+            df = pd.DataFrame(self.df_store[key])
+            df = (
+                IndicatorCalculator(df)
+                .calculate_rsi()
+                .calculate_macd()
+                .calculate_bollinger()
+                .get_df()
+            )
+
+        elif subscribe_type == "depth":
+            symbol = data.get("symbol")
+            if symbol:
+                self.order_books[symbol] = data
+
+        # Forward ONLY ticker.* to core.message_handler
+        if self._message_callback and isinstance(msg, dict):
+            sub = msg.get("subscribe", "")
+            if isinstance(sub, str) and sub.startswith("ticker."):
+                try:
+                    await self._message_callback(msg, self.df_store, self.order_books)
+                except Exception as cb_exc:
+                    self.logger.exception("External message callback failed: %s", cb_exc)

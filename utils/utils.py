@@ -9,10 +9,12 @@ import pandas as pd
 import logging
 from typing import Optional, Dict, Any
 
-def load_config(path="config.json"):
-    with open(path, "r") as f:
-        return json.load(f)
-
+"""
+utils/utils.py
+--------------
+Utility helpers. Includes a safe REST kline fetcher that never hard-crashes
+when timeframe maps are missing.
+"""
 
 def fetch_initial_kline(
     symbol: str,
@@ -21,8 +23,15 @@ def fetch_initial_kline(
     rest_code_map: Optional[Dict[str, str]] = None,
     config: Optional[Dict[str, Any]] = None,
     logger: Optional[logging.Logger] = None,
-    ) -> pd.DataFrame:
-    # 1) Resolve rest_code_map if not provided
+) -> pd.DataFrame:
+    """
+    Fetch initial OHLCV rows from LBank REST API safely.
+
+    - Resolves `rest_code_map` from argument, config, or environment.
+    - Returns an empty DataFrame (with a warning) instead of raising.
+    - Compatible with Python < 3.10 (uses Optional[...] not `|`).
+    """
+    # 1) Resolve map if not provided
     if rest_code_map is None:
         if config is not None:
             rest_code_map = (
@@ -31,67 +40,86 @@ def fetch_initial_kline(
                 or {}
             )
         if not rest_code_map:
-            # Build directly from env as a last resort
+            # Last resort: build from env
             rest_code_map = {
                 k.replace("REST_TIMEFRAME_CODES_", "").lower(): v
                 for k, v in os.environ.items()
                 if k.startswith("REST_TIMEFRAME_CODES_")
             }
 
-    # 2) If still empty, just warn & return empty DF
     if not rest_code_map:
         if logger:
-            logger.warning("No rest_code_map / REST_TIMEFRAME_CODES found; returning empty DataFrame.")
+            logger.warning("No rest_code_map / REST_TIMEFRAME_CODES; returning empty DataFrame.")
         return pd.DataFrame()
+
+    # If someone passed the REST code instead of canonical (minute1 instead of 1m), map back
+    # after resolving rest_code_map
+
+    if interval not in rest_code_map:
+        reverse = {v: k for k, v in rest_code_map.items()}
+        interval = reverse.get(interval, interval)
 
     if interval not in rest_code_map:
         if logger:
             logger.error("Unknown interval '%s' for REST API", interval)
         return pd.DataFrame()
-        
+
     rest_interval = rest_code_map[interval]
 
     base_url = "https://api.lbank.info/v2/kline.do"
-
     minutes = {
-        "4h":240,
-        "1h":60,
-        "15min":15,
-        "5min":5,
-        "1min":1
-        }
+        "1m": 1,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "4h": 240,
+        "8h": 480,
+        "12h": 720,
+        "1d": 1440,
+        "1w": 10080,
+        "1mth": 43200,
+    }
 
     end_time = int(time.time())
-    start_time = end_time - minutes[interval] * 60 * size # size * 60sec
+    start_time = end_time - minutes.get(interval, 1) * 60 * size
 
     params = {
         "symbol": symbol,
         "size": size,
         "type": rest_interval,
-        "time": str(start_time)
+        "time": str(start_time),
     }
 
     try:
-        print(base_url, params)
-        response = requests.get(base_url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data["result"] is False or not data.get("data"):
-            raise ValueError(f"No data returned for {symbol}-{interval}")
-        df = pd.DataFrame(data["data"], columns=[
-            "timestamp", "open", "high", "low", "close", "volume"
-        ])
-        df["timestamp"] = df["timestamp"].astype(int)
-        df["open"] = df["open"].astype(float)
-        df["high"] = df["high"].astype(float)
-        df["low"] = df["low"].astype(float)
-        df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
-        return df
-    except Exception as e:
-        print(f"[ERROR] fetch_initial_kline failed for {symbol}-{interval}: {e}")
-        return pd.DataFrame()
+        resp = requests.get(base_url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
 
+        if not data.get("result") or not data.get("data"):
+            raise ValueError(f"No data returned for {symbol}-{interval}")
+
+        df = pd.DataFrame(
+            data["data"],
+            columns=["timestamp", "open", "high", "low", "close", "volume"],
+        ).astype(
+            {
+                "timestamp": int,
+                "open": float,
+                "high": float,
+                "low": float,
+                "close": float,
+                "volume": float,
+            }
+        )
+        return df
+
+    except Exception as e:
+        if logger:
+            logger.error("fetch_initial_kline failed for %s-%s: %s", symbol, interval, e)
+        else:
+            print(f"[ERROR] fetch_initial_kline failed for {symbol}-{interval}: {e}")
+        return pd.DataFrame()
 
 
 def log_signal(msg, file=None):
