@@ -333,6 +333,11 @@ class WebSocketClient:
                 .calculate_rsi()
                 .calculate_macd()
                 .calculate_bollinger()
+                .calculate_ichimoku()
+                .calculate_keltner()
+                .calculate_fibonacci()
+                .detect_candlestick_patterns()
+                .find_swing_points()
                 .get_df()
             )
 
