@@ -34,10 +34,12 @@ def load_configuration(env_path: str = "config.env") -> Dict:
     rest_codes: Dict[str, str] = {}
     for key, val in os.environ.items():
         if key.startswith("WEBSOCKET_TIMEFRAME_CODES_"):
-            tf = key.replace("WEBSOCKET_TIMEFRAME_CODES_", "").lower()
+            raw_ws_tf = key.replace("WEBSOCKET_TIMEFRAME_CODES_", "").lower()
+            tf = normalize_tf(raw_ws_tf) 
             ws_codes[tf] = val
         elif key.startswith("REST_TIMEFRAME_CODES_"):
-            tf = key.replace("REST_TIMEFRAME_CODES_", "").lower()
+            raw_rest_tf = key.replace("REST_TIMEFRAME_CODES_", "").lower()
+            tf = normalize_tf(raw_rest_tf) 
             rest_codes[tf] = val
     #new by chatGPT#conf["TIMEFRAMES"] = [normalize_tf(t.strip()) for t in timeframes_raw.split(",") if t.strip()]
     conf: Dict[str, object] = {
