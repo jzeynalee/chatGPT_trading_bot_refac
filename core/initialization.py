@@ -41,11 +41,13 @@ def load_configuration(env_path: str = "config.env") -> Dict:
             raw_rest_tf = key.replace("REST_TIMEFRAME_CODES_", "").lower()
             tf = normalize_tf(raw_rest_tf) 
             rest_codes[tf] = val
+    log.debug("WS map keys:   %s", list(ws_codes.keys()))
+    log.debug("REST map keys: %s", list(rest_codes.keys()))
+
     #new by chatGPT#conf["TIMEFRAMES"] = [normalize_tf(t.strip()) for t in timeframes_raw.split(",") if t.strip()]
     conf: Dict[str, object] = {
         "SYMBOLS": [s.strip().lower() for s in symbols_raw.split(",") if s.strip()],
         "TIMEFRAMES": [normalize_tf(t.strip()) for t in timeframes_raw.split(",") if t.strip()],
-        #old code #"TIMEFRAMES": [t.strip().lower() for t in timeframes_raw.split(",") if t.strip()],
         "WEBSOCKET_TIMEFRAME_CODES": ws_codes,
         "REST_TIMEFRAME_CODES": rest_codes,
 
