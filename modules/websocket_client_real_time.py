@@ -191,11 +191,12 @@ class WebSocketClient:
     # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #
+    
     async def _heartbeat(self, interval: int = 25) -> None:
-        """Send periodic pings to keep the connection alive."""
         while self.is_running and self.ws:
             try:
-                await self.ws.ping()
+                pong = await self.ws.ping()
+                await asyncio.wait_for(pong, timeout=10)
             except Exception as e:
                 self.logger.warning("Heartbeat ping failed: %s", e)
                 break
@@ -272,8 +273,9 @@ class WebSocketClient:
             async for raw in self.ws:
                 await self.queue.put(raw)
         except websockets.exceptions.ConnectionClosed as e:
-            self.logger.warning("WS closed unexpectedly: code=%s reason=%s",
-                                getattr(e, 'code', '?'), getattr(e, 'reason', '?'))
+            # 1000 = normal close, 1006 = timeout / no close frame
+            level = self.logger.warning if e.code not in (1000, 1006) else self.logger.info
+            level("WS closed (code=%s reason=%s)", e.code, e.reason)
         except Exception:
             self.logger.exception("Listen loop crashed")
         finally:
