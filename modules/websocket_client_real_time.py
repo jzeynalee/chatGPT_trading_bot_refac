@@ -214,8 +214,9 @@ class WebSocketClient:
                     "kbar": ws_tf,
                     "pair": symbol
                 })
-                await self.ws.send(kbar_msg)
-                self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(kbar_msg))
+                new_var = kbar_msg
+                await self.ws.send(new_var)
+                self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(new_var))
 
                 # depth
                 depth_msg = json.dumps({
@@ -224,7 +225,7 @@ class WebSocketClient:
                     "pair": symbol,
                     "depth": depth_level
                 })
-                self.logger.info("▶ WS SUBSCRIBE for Depth %s", json.dumps(kbadepth_msgr_msg))
+                self.logger.info("▶ WS SUBSCRIBE for Depth %s", json.dumps(depth_msg))
                 await self.ws.send(depth_msg)
 
                 # Prefill REST data for this TF
