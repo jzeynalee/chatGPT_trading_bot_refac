@@ -208,20 +208,24 @@ class WebSocketClient:
                 ws_tf = self.timeframe_mapping.get(tf, tf)
 
                 # kbar
-                await self.ws.send(json.dumps({
+                kbar_msg = json.dumps({
                     "action": "subscribe",
                     "subscribe": "kbar",
                     "kbar": ws_tf,
                     "pair": symbol
-                }))
+                })
+                await self.ws.send(kbar_msg)
+                self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(kbar_msg))
 
                 # depth
-                await self.ws.send(json.dumps({
+                depth_msg = json.dumps({
                     "action": "subscribe",
                     "subscribe": "depth",
                     "pair": symbol,
                     "depth": depth_level
-                }))
+                })
+                self.logger.info("▶ WS SUBSCRIBE for Depth %s", json.dumps(kbadepth_msgr_msg))
+                await self.ws.send(depth_msg)
 
                 # Prefill REST data for this TF
                 await self.prefill_data(symbol, tf)
