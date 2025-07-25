@@ -8,6 +8,7 @@ import requests
 import pandas as pd
 import logging
 from typing import Optional, Dict, Any
+import urllib.parse
 
 """
 utils/utils.py
@@ -90,6 +91,11 @@ def fetch_initial_kline(
         "type": rest_interval,
         "time": str(start_time),
     }
+
+    # log complete REST URL
+    full_url = f"{base_url}?symbol={symbol}&size={size}&type={rest_interval}&time={start_time}"
+    if logger:
+        logger.info("⏩ REST GET → %s", full_url)
 
     try:
         resp = requests.get(base_url, params=params, timeout=10)

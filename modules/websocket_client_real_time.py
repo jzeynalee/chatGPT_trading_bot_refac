@@ -149,6 +149,7 @@ class WebSocketClient:
         async with websockets.connect(self._ws_url, ping_interval=None) as ws:
             self.ws = ws
             self.logger.info("✅ Connected to WS: %s", self._ws_url)
+            self.logger.info("✅ WS connect → %s", self._ws_url)
 
             # Heartbeat
             self._hb_task = asyncio.create_task(self._heartbeat())
