@@ -36,7 +36,9 @@ async def run_bot() -> None:
 
 
 def main() -> None:
-    """Sync wrapper for Windows/Python <3.11 compatibility."""
+    """
+    Sync wrapper for Windows/Python <3.11 compatibility.
+    """
     try:
         asyncio.run(run_bot())
     except RuntimeError as e:
