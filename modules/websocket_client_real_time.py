@@ -124,13 +124,16 @@ class WebSocketClient:
         """Register/replace the coroutine to process inbound ticker messages."""
         self._message_callback = cb
 
-    def max_retries_reached(self) -> bool:
-        return self._retries >= self._max_retries
+    #def max_retries_reached(self) -> bool:
+    #    return self._retries >= self._max_retries
+    
+    def stop(self) -> None:
+        self._stop = True
 
     async def run(self) -> None:
         """Keep reconnecting until stop() is called."""
         backoff = 1
-        while not getattr(self, "_stop", False):
+        while not self._stop:
             try:
                 await self._connect_once()   # one full connect/session
                 backoff = 1                  # reset after a clean session
@@ -143,21 +146,35 @@ class WebSocketClient:
                 raise
             except Exception as exc:
                 self.logger.exception("WS session crashed: %s", exc)
+            if self._stop:
+                break
             # exponential backoff
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
+        self.is_running = False
 
+    # ------------------------------------------------------------------ #
+    # One session
+    # ------------------------------------------------------------------ #
+    
     async def _connect_once(self) -> None:
+        """Open, subscribe, listen; exit when socket closes."""
+        if not self._ws_url:
+            raise RuntimeError("WebSocket URL not configured.")
+        
         self.is_running = True
         async with websockets.connect(self._ws_url, ping_interval=None) as ws:
             self.ws = ws
             self.logger.info("✅ WS connect → %s", self._ws_url)
-
+            
+            # Heartbeat
             self._hb_task = asyncio.create_task(self._heartbeat())
+            
+            # Listener & consumer
             self._listener_task = asyncio.create_task(self.listen_messages())
             self._consumer_task = asyncio.create_task(self.process_message_queue())
 
-            # Subscribe AFTER prefill (see earlier patch)
+            # Subscribe AFTER prefill
             await self.subscribe_to_channels()
 
             # Wait here until listener sets is_running False
@@ -167,15 +184,13 @@ class WebSocketClient:
         # if we leave the context, socket is closed → raise to trigger reconnect
         raise RuntimeError("WS context exited")
     
-    async def connect(self):
+    '''async def connect(self):
         # deprecated, kept for old callers
-        return await self._connect_once()
-    
-    def stop(self) -> None:
-        self._stop = True
+        return await self._connect_once()'''
 
     async def graceful_shutdown(self) -> bool:
         """Stop loops and close resources cleanly."""
+        self._stop = True
         self.is_running = False
 
         # Unblock consumer
