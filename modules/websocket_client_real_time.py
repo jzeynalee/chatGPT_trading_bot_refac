@@ -167,24 +167,33 @@ class WebSocketClient:
             self.ws = ws
             self.logger.info("✅ WS connect → %s", self._ws_url)
             
-            # Heartbeat
-            self._hb_task = asyncio.create_task(self._heartbeat())
-            
-            # Listener & consumer
-            self._listener_task = asyncio.create_task(self.listen_messages())
-            self._consumer_task = asyncio.create_task(self.process_message_queue())
+            # PREFILL FIRST
+            await self.subscribe_to_channels()
+            self._sub_count = getattr(self, "_sub_count", 0) + 1
+            self.logger.info("🎯 Subscribing batch #%s (symbols=%s, tfs=%s)", self._sub_count, self.symbols, self.timeframes)
 
             # Subscribe AFTER prefill
             await self.subscribe_to_channels()
             # Temp logger
             self.logger.info("🎯 Reconnected. Subscribing symbols=%s tfs=%s", self.symbols, self.timeframes)
 
+            # Listener & consumer
+            self._listener_task = asyncio.create_task(self.listen_messages())
+            self._consumer_task = asyncio.create_task(self.process_message_queue())
+
+            # Heartbeat
+            self._hb_task = asyncio.create_task(self._heartbeat())
+            
+
             # Wait here until listener sets is_running False
             while self.is_running:
                 await asyncio.sleep(1)
 
         # if we leave the context, socket is closed → raise to trigger reconnect
-        raise RuntimeError("WS context exited")
+        #raise RuntimeError("WS context exited")
+        self.logger.info("WS session ended, will reconnect…")
+        return
+
     
     '''async def connect(self):
         # deprecated, kept for old callers
@@ -335,7 +344,11 @@ class WebSocketClient:
             self._kbar_count = getattr(self, "_kbar_count", 0) + 1
             if self._kbar_count % 100 == 0:
                 self.logger.info("Received %s kbar messages total", self._kbar_count)
-            
+
+            self._msg_total = getattr(self, "_msg_total", 0) + 1
+            if self._msg_total % 200 == 0:
+                self.logger.info("📦 Processed %s WS messages", self._msg_total)
+
             self._total_msgs = getattr(self, "_total_msgs", 0) + 1
             if self._total_msgs % 200 == 0:
                 self.logger.info("📦 Total WS msgs processed: %s", self._total_msgs)

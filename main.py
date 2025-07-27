@@ -8,8 +8,8 @@ from modules.trade_planner import TradePlanner
 from modules.indicator import IndicatorCalculator
 from utils.logger import setup_logger
 
-
 async def run_bot() -> None:
+
     # Initialize all components and configuration
     config = load_configuration()
     components = initialize_components(config)
@@ -17,23 +17,26 @@ async def run_bot() -> None:
     # Set up WebSocket client with dependencies injected
     logger = components['logger']
     ws_client = components['websocket_client']
-    trader = components['trader'] # kept for future use
 
     # Start the application
     logger.info(f"✅ Starting Trading Bot...")
 
-    try:
-        await ws_client.run()  # reconnect loop lives inside
-    except asyncio.CancelledError:
-        raise
-    except KeyboardInterrupt:
-        logger.info(f"✅ Received shutdown signal...")
-    except Exception:
-        logger.error("Fatal WS error in run_bot()!")
-    finally:
-        await ws_client.graceful_shutdown()
-        logger.info("👋 Bot stopped cleanly.")
 
+    backoff = 1
+    while True:                              # keep supervising
+        try:
+            await ws_client.run()            # internal reconnect loop
+            logger.info("WS run() returned cleanly. Exiting supervisor.")
+            break
+        except KeyboardInterrupt:
+            logger.info("🛑 Shutdown requested by user.")
+            break
+        except Exception as e:
+            logger.exception("Fatal WS error in run_bot(): %r", e)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)   # retry
+    await ws_client.graceful_shutdown()
+    logger.info("👋 Bot stopped cleanly.")
 
 def main() -> None:
     """
