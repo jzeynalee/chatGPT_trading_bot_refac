@@ -176,6 +176,8 @@ class WebSocketClient:
 
             # Subscribe AFTER prefill
             await self.subscribe_to_channels()
+            # Temp logger
+            self.logger.info("🎯 Reconnected. Subscribing symbols=%s tfs=%s", self.symbols, self.timeframes)
 
             # Wait here until listener sets is_running False
             while self.is_running:
@@ -260,6 +262,8 @@ class WebSocketClient:
                 }
                 self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(kbar_msg))
                 await self.ws.send(json.dumps(kbar_msg))
+                # Temp Logger
+                self.logger.info("▶ Sent kbar sub: %s %s", symbol, ws_tf)
 
                 # depth
                 depth_msg = {
@@ -327,6 +331,15 @@ class WebSocketClient:
         """Internal per-message handler (NOT the core handler)."""
         try:
             msg = json.loads(raw_msg)
+            # Temp Counters and Logs
+            self._kbar_count = getattr(self, "_kbar_count", 0) + 1
+            if self._kbar_count % 100 == 0:
+                self.logger.info("Received %s kbar messages total", self._kbar_count)
+            
+            self._total_msgs = getattr(self, "_total_msgs", 0) + 1
+            if self._total_msgs % 200 == 0:
+                self.logger.info("📦 Total WS msgs processed: %s", self._total_msgs)
+
         except Exception:
             self.logger.warning("Malformed WS payload: %s", raw_msg)
             return
