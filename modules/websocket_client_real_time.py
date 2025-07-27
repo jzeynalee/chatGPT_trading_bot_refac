@@ -128,41 +128,51 @@ class WebSocketClient:
         return self._retries >= self._max_retries
 
     async def run(self) -> None:
-        """Reconnect loop with simple backoff."""
-        while not self.max_retries_reached():
+        """Keep reconnecting until stop() is called."""
+        backoff = 1
+        while not getattr(self, "_stop", False):
             try:
-                await self.connect()
-                break  # graceful close
+                await self._connect_once()   # one full connect/session
+                backoff = 1                  # reset after a clean session
+            except RuntimeError as e:
+                if str(e) == "WS context exited":
+                    backoff = 1  # normal reconnect
+                else:
+                    self.logger.exception("WS session crashed: %s", e)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self._retries += 1
-                self.logger.warning("Reconnect #%s after error: %s", self._retries, exc)
-                await asyncio.sleep(min(5 * self._retries, 30))
-        self.is_running = False
+                self.logger.exception("WS session crashed: %s", exc)
+            # exponential backoff
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
 
-    async def connect(self) -> None:
-        if not self._ws_url:
-            raise RuntimeError("WebSocket URL not configured.")
+    async def _connect_once(self) -> None:
         self.is_running = True
-
         async with websockets.connect(self._ws_url, ping_interval=None) as ws:
             self.ws = ws
-            self.logger.info("✅ Connected to WS: %s", self._ws_url)
             self.logger.info("✅ WS connect → %s", self._ws_url)
 
-            # Heartbeat
             self._hb_task = asyncio.create_task(self._heartbeat())
-
-            await self.subscribe_to_channels()
-
-            # Spawn listener & consumer
             self._listener_task = asyncio.create_task(self.listen_messages())
             self._consumer_task = asyncio.create_task(self.process_message_queue())
 
-            # Keep this coroutine alive until shutdown
+            # Subscribe AFTER prefill (see earlier patch)
+            await self.subscribe_to_channels()
+
+            # Wait here until listener sets is_running False
             while self.is_running:
                 await asyncio.sleep(1)
+
+        # if we leave the context, socket is closed → raise to trigger reconnect
+        raise RuntimeError("WS context exited")
+    
+    async def connect(self):
+        # deprecated, kept for old callers
+        return await self._connect_once()
+    
+    def stop(self) -> None:
+        self._stop = True
 
     async def graceful_shutdown(self) -> bool:
         """Stop loops and close resources cleanly."""
@@ -199,6 +209,11 @@ class WebSocketClient:
                 await asyncio.wait_for(pong, timeout=10)
             except Exception as e:
                 self.logger.warning("Heartbeat ping failed: %s", e)
+                self.is_running = False
+                try:
+                    await self.ws.close()
+                except Exception:
+                    pass
                 break
             await asyncio.sleep(interval)
 
@@ -216,36 +231,33 @@ class WebSocketClient:
                 # ------------------------------------------------------
                 # Use the *env‑provided* WS code.  Fallback to REST code,
                 # and only finally to the canonical key if nothing exists.
-                #ws_tf = (
-                #    self.timeframe_mapping.get(tf)      # e.g. "5min", "1hr"
-                #    or self.rest_code_map.get(tf)       # e.g. "minute5", "hour1"
-                #    or tf                               # last‑ditch: "5m"
-                #)
+               
                 ws_tf = self.timeframe_mapping.get(tf)
-
+                if ws_tf is None:
+                    self.logger.warning("No WS code for timeframe %s – skipping", tf)
+                    continue
                 # kbar
-                kbar_msg = json.dumps({
+                kbar_msg = {
                     "action": "subscribe",
                     "subscribe": "kbar",
                     "kbar": ws_tf,
                     "pair": symbol
-                })
-                new_var = kbar_msg
-                await self.ws.send(new_var)
-                self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(new_var))
+                }
+                self.logger.info("▶ WS SUBSCRIBE for OHLC→ %s", json.dumps(kbar_msg))
+                await self.ws.send(json.dumps(kbar_msg))
 
                 # depth
-                depth_msg = json.dumps({
+                depth_msg = {
                     "action": "subscribe",
                     "subscribe": "depth",
                     "pair": symbol,
                     "depth": depth_level
-                })
+                }
                 self.logger.info("▶ WS SUBSCRIBE for Depth %s", json.dumps(depth_msg))
-                await self.ws.send(depth_msg)
+                await self.ws.send(json.dumps(depth_msg))
 
                 # Prefill REST data for this TF
-                await self.prefill_data(symbol, tf)
+                #await self.prefill_data(symbol, tf)
 
     async def prefill_data(self, symbol: str, timeframe: str) -> None:
         canonical_tf = normalize_tf(timeframe)
@@ -285,7 +297,7 @@ class WebSocketClient:
 
     async def process_message_queue(self) -> None:
         """Consume raw websocket frames from the queue and handle them."""
-        while self.is_running:
+        while True:
             try:
                 raw = await self.queue.get()
                 if raw is None:  # sentinel to exit

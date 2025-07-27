@@ -22,8 +22,6 @@ async def run_bot() -> None:
 
     # Set up WebSocket client with dependencies injected
     ws_client = components['websocket_client']
-    #ws_client.set_message_callback(handle_message)
-
     trader = components['trader']
     symbol_data_provider = components['data_provider']
     trade_planner = TradePlanner()
@@ -31,60 +29,15 @@ async def run_bot() -> None:
     # Start the application
     logger.info(f"✅ Starting Trading Bot...")
 
-    while True:
-        try:
-            await ws_client.connect()                
-            # If we get here, it means the connection was closed gracefully or max retries reached
-            if not ws_client.is_running or ws_client.max_retries_reached():
-                break
+    try:
+        await ws_client.run() 
+    except KeyboardInterrupt:
+        logger.info(f"✅ Received shutdown signal...")
+    except Exception:
+        logger.error("Fatal WS error in run_bot()!")
+    finally:
+        await ws_client.graceful_shutdown()
 
-            cleanup_successful = False
-            while not cleanup_successful:
-                cleanup_successful = await ws_client.graceful_shutdown()
-                break
-
-        except KeyboardInterrupt:
-            logger.info(f"✅ Received shutdown signal...")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            break
-
-        # Example hook for SL/TP planning after signal detection
-        # Replace this section with your actual signal routing logic
-        try:
-            signal = components.get("latest_signal")
-            if signal:
-                symbol = signal['symbol']
-                entry_price = signal['entry']
-                timeframes = ['15m', '1h', '4h']
-
-                data_by_tf = {}
-                for tf in timeframes:
-                    df = symbol_data_provider.get_ohlcv(symbol, tf)
-                    df = IndicatorCalculator(df).add_swing_points().calculate_ma(50).df
-                    data_by_tf[tf] = df
-
-                fib_levels = {}
-
-                sl_tp_plan = trade_planner.generate_sl_tp_plan(
-                    entry_price=entry_price,
-                    symbol=symbol,
-                    data_by_timeframe=data_by_tf,
-                    fib_levels=fib_levels
-                )
-
-                best_plan = trade_planner.select_best_sl_tp(sl_tp_plan)
-
-                if 'error' not in best_plan:
-                    sl = best_plan['sl']
-                    tp = best_plan['tp']
-                    logger.info("✅ Executing trade for {symbol} with SL: {sl}, TP: {tp} using method {best_plan['method']}")
-                    trader.place_order(symbol=symbol, entry=entry_price, sl=sl, tp=tp)
-                else:
-                    logger.warning(f"No valid SL/TP plan found for {symbol}. Trade skipped.")
-        except Exception as e:
-            logger.error(f"Failed to plan trade: {e}")
 
 def main() -> None:
     """Main entry point for the application - pure orchestration."""
