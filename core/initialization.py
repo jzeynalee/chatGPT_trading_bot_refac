@@ -106,8 +106,10 @@ def initialize_components(
     overrides = overrides or {}
     config = ConfigManager(config)#: Dict[str, Any]) -> None
 
-    # 1) Logger
+    # 1) Logger    
+    from utils.logger import setup_logger
     logger = overrides.get("logger") or setup_logger(__name__)
+    components = initialize_components(config=config, logger=logger)
 
     # 2) Strategy (TradePlanner) – handle possible 'equity' arg via try/except
     strategy = overrides.get("strategy")
@@ -140,7 +142,7 @@ def initialize_components(
 
         candidate_args = {
             "config": config,
-            "logger": logger,
+            "logger": logger, #setup_logger("WebSocketClient"),
             "trader": trader,
             "strategy": strategy,
             "data_provider": data_provider,

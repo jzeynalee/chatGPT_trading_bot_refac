@@ -10,6 +10,8 @@ import websockets
 from utils.utils import fetch_initial_kline
 from modules.indicator import IndicatorCalculator
 from utils.timeframe import normalize_tf
+from utils.logger import setup_logger
+
 
 
 class ConfigManager:
@@ -64,7 +66,10 @@ class WebSocketClient:
         data_provider: Any = None,
     ):
         self.config_mgr = ConfigManager(config)
-        self.logger = logger or logging.getLogger(__name__)
+        
+        self.logger = logger if logger else setup_logger("WebSocketClient")
+        self.logger.info("✅ WebSocketClient initialized with URL: %s", self.url)
+        
         self._message_callback = message_callback
 
         self.url = self.config_mgr.get_ws_url()
