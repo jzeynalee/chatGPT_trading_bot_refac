@@ -12,6 +12,7 @@ from utils.logger import setup_logger
 async def run_bot() -> None:
 
     # Initialize all components and configuration
+    load_dotenv()   
     config = load_configuration()
     validate_config(config)
     components = initialize_components(config)
