@@ -30,8 +30,8 @@ def load_configuration(env_path: str = "config.env") -> Dict:
     load_dotenv(dotenv_path=env_path)  
     log.debug("my_config_items:   %s", os.environ.items())
 
-    symbols_raw = os.getenv("SYMBOLS_VALUE", "")
-    timeframes_raw = os.getenv("TIMEFRAMES_VALUE", "")
+    symbols_raw = os.getenv("SYMBOLS", "")
+    timeframes_raw = os.getenv("TIMEFRAMES", "")
 
     # Build timeframe code maps from env like REST_TIMEFRAME_CODES_1H=hour1
     ws_codes: Dict[str, str] = {}
