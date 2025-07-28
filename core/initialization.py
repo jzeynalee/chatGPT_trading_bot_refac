@@ -18,6 +18,8 @@ from modules.websocket_client_real_time import WebSocketClient
 from modules.trader import Trader
 from modules.trade_planner import TradePlanner
 from utils.timeframe import normalize_tf
+from utils.config_manager import ConfigManager
+
 
 
 def load_configuration(env_path: str = "config.env") -> Dict:
@@ -102,6 +104,7 @@ def initialize_components(
     {"logger", "strategy", "trader", "websocket_client", "data_provider"}
     """
     overrides = overrides or {}
+    config = ConfigManager(config)#: Dict[str, Any]) -> None
 
     # 1) Logger
     logger = overrides.get("logger") or setup_logger(__name__)

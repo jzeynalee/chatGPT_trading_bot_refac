@@ -3,6 +3,7 @@ import logging
 from dotenv import load_dotenv
 
 from core.initialization import initialize_components, load_configuration
+from utils.config_validator import validate_config
 from core.message_handler import handle_message
 from modules.trade_planner import TradePlanner
 from modules.indicator import IndicatorCalculator
@@ -12,11 +13,13 @@ async def run_bot() -> None:
 
     # Initialize all components and configuration
     config = load_configuration()
+    validate_config(config)
     components = initialize_components(config)
 
     # Set up WebSocket client with dependencies injected
     logger = components['logger']
     ws_client = components['websocket_client']
+    ws_client.set_message_callback(handle_message)
 
     # Start the application
     logger.info(f"✅ Starting Trading Bot...")
