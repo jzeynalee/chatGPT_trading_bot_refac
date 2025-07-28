@@ -3,22 +3,42 @@ import numpy as np
 from scipy.signal import argrelextrema
 
 class IndicatorCalculator:
-    def __init__(self, df):
-        self.df = df.copy()    
+    def __init__(self, df=None):
+        self.df = df.copy() if df is not None else pd.DataFrame()
 
-    def calculate_ichimoku(self, tenkan=9, kijun=26, senkou=52):
+    def update(self, new_row: dict):
+        self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
+        if len(self.df) > 200:
+            self.df = self.df.iloc[-200:]
+
+        return self.run_all(latest_only=True)
+
+    def run_all(self, latest_only=False):
+        return (
+            self.calculate_ichimoku(latest_only)
+                .calculate_keltner(latest_only)
+                .find_swing_points(latest_only)
+                .calculate_fibonacci()
+                .calculate_bollinger(latest_only)
+                .calculate_rsi(latest_only)
+                .calculate_macd(latest_only)
+                .detect_candlestick_patterns(latest_only)
+        )
+
+    def calculate_ichimoku(self, latest_only=False, tenkan=9, kijun=26, senkou=52):
         high = self.df['high_price']
         low = self.df['low_price']
         close = self.df['close_price']
 
-        self.df['tenkan_sen'] = (high.rolling(tenkan).max() + low.rolling(tenkan).min()) / 2
-        self.df['kijun_sen'] = (high.rolling(kijun).max() + low.rolling(kijun).min()) / 2
-        self.df['senkou_span_a'] = ((self.df['tenkan_sen'] + self.df['kijun_sen']) / 2).shift(kijun)
-        self.df['senkou_span_b'] = ((high.rolling(senkou).max() + low.rolling(senkou).min()) / 2).shift(kijun)
-        self.df['chikou_span'] = close.shift(-kijun)
+        last = None if not latest_only else -1
+        self.df.loc[:, 'tenkan_sen'] = (high.rolling(tenkan).max() + low.rolling(tenkan).min()) / 2
+        self.df.loc[:, 'kijun_sen'] = (high.rolling(kijun).max() + low.rolling(kijun).min()) / 2
+        self.df.loc[:, 'senkou_span_a'] = ((self.df['tenkan_sen'] + self.df['kijun_sen']) / 2).shift(kijun)
+        self.df.loc[:, 'senkou_span_b'] = ((high.rolling(senkou).max() + low.rolling(senkou).min()) / 2).shift(kijun)
+        self.df.loc[:, 'chikou_span'] = close.shift(-kijun)
         return self
 
-    def calculate_keltner(self, ema_period=20, atr_period=10, multiplier=2):
+    def calculate_keltner(self, latest_only=False, ema_period=20, atr_period=10, multiplier=2):
         df = self.df
         df['ema'] = df['close_price'].ewm(span=ema_period, adjust=False).mean()
         df['tr'] = np.maximum(df['high_price'] - df['low_price'],
@@ -29,7 +49,7 @@ class IndicatorCalculator:
         df['keltner_lower'] = df['ema'] - multiplier * df['atr']
         return self
 
-    def find_swing_points(self, order=3):
+    def find_swing_points(self, latest_only=False, order=3):
         high = self.df['high_price']
         low = self.df['low_price']
 
@@ -48,8 +68,8 @@ class IndicatorCalculator:
         swing_lows = self.df['swing_low'].dropna()
 
         if swing_highs.empty or swing_lows.empty:
-            self.df['fib_0'] = self.df['fib_23.6'] = self.df['fib_38.2'] = self.df['fib_50.0'] = \
-            self.df['fib_61.8'] = self.df['fib_78.6'] = self.df['fib_100'] = np.nan
+            for level in ['fib_0', 'fib_23.6', 'fib_38.2', 'fib_50.0', 'fib_61.8', 'fib_78.6', 'fib_100']:
+                self.df[level] = np.nan
             return self
 
         last_high = swing_highs.iloc[-1]
@@ -70,7 +90,7 @@ class IndicatorCalculator:
             self.df[key] = val
         return self
 
-    def calculate_bollinger(self, period=20, num_std=2):
+    def calculate_bollinger(self, latest_only=False, period=20, num_std=2):
         close = self.df['close_price']
         self.df['boll_sma'] = close.rolling(window=period).mean()
         self.df['boll_std'] = close.rolling(window=period).std()
@@ -78,8 +98,7 @@ class IndicatorCalculator:
         self.df['boll_lower'] = self.df['boll_sma'] - num_std * self.df['boll_std']
         return self
 
-
-    def calculate_rsi(self, period=14):
+    def calculate_rsi(self, latest_only=False, period=14):
         delta = self.df['close_price'].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -89,7 +108,7 @@ class IndicatorCalculator:
         self.df['rsi'] = 100 - (100 / (1 + rs))
         return self
 
-    def calculate_macd(self, fast=12, slow=26, signal=9):
+    def calculate_macd(self, latest_only=False, fast=12, slow=26, signal=9):
         ema_fast = self.df['close_price'].ewm(span=fast).mean()
         ema_slow = self.df['close_price'].ewm(span=slow).mean()
         self.df['macd'] = ema_fast - ema_slow
@@ -97,7 +116,7 @@ class IndicatorCalculator:
         self.df['macd_hist'] = self.df['macd'] - self.df['macd_signal']
         return self
 
-    def detect_candlestick_patterns(self):
+    def detect_candlestick_patterns(self, latest_only=False):
         df = self.df
         df['bullish_candle'] = df['close_price'] > df['open_price']
         df['bearish_candle'] = df['close_price'] < df['open_price']
