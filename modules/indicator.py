@@ -3,11 +3,23 @@ import numpy as np
 from scipy.signal import argrelextrema
 
 class IndicatorCalculator:
+    def _normalize_columns(self):
+        rename_map = {
+        "open": "open_price",
+        "high": "high_price",
+        "low": "low_price",
+        "close": "close_price",
+        "volume": "volume"
+        }
+        self.df.rename(columns=rename_map, inplace=True)
+
     def __init__(self, df=None):
         self.df = df.copy() if df is not None else pd.DataFrame()
+        self._normalize_columns()
 
     def update(self, new_row: dict):
         self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
+        self._normalize_columns()
         if len(self.df) > 200:
             self.df = self.df.iloc[-200:]
 
