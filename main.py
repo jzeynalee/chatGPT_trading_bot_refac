@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from dotenv import load_dotenv
 
 from core.initialization import initialize_components, load_configuration
 from utils.config_validator import validate_config
@@ -10,8 +9,8 @@ from modules.indicator import IndicatorCalculator
 from utils.logger import setup_logger
 
 async def run_bot() -> None:
-
-    # Initialize all components and configuration
+    # Initialize all components and configuration    
+    from dotenv import load_dotenv
     load_dotenv()   
     config = load_configuration()
     validate_config(config)
