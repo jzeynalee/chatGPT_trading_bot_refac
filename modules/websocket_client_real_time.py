@@ -122,17 +122,30 @@ class WebSocketClient:
 
     async def _connect_once(self) -> None:
         self.is_running = True
-        async with websockets.connect(self.url, ping_interval=None) as ws:
-            self.ws = ws
-            self.logger.info("✅ WS connect → %s", self.url)
-            await self.prefill_all_data()
-            await self.subscribe_all()
-            self._listener_task = asyncio.create_task(self.listen_messages())
-            self._consumer_task = asyncio.create_task(self.process_message_queue())
-            self._hb_task = asyncio.create_task(self._heartbeat())
-            while self.is_running:
-                await asyncio.sleep(1)
-        self.logger.info("WS session ended, will reconnect…")
+        try:
+            async with websockets.connect(self.url, ping_interval=None) as ws:
+                self.ws = ws
+                self.logger.info("✅ WS connect → %s", self.url)
+
+                # Start listener & consumer early to handle server responses (including pong)
+                self._listener_task = asyncio.create_task(self.listen_messages())
+                self._consumer_task = asyncio.create_task(self.process_message_queue())
+                self._hb_task = asyncio.create_task(self._heartbeat())
+
+                # Prefill data and subscribe to symbols/timeframes
+                await self.prefill_all_data()
+                await self.subscribe_all()
+
+                # Keep connection alive
+                while self.is_running:
+                    await asyncio.sleep(1)
+
+        except Exception as exc:
+            self.logger.exception("❌ WebSocket session crashed: %s", exc)
+
+        finally:
+            self.logger.info("🔁 WS session ended, preparing to reconnect...")
+            self.is_running = False
 
     async def graceful_shutdown(self) -> bool:
         self._stop = True
@@ -181,6 +194,7 @@ class WebSocketClient:
                     self.logger.warning("No WS code for timeframe %s – skipping", tf)
                     continue
                 await self.send_subscribe_msg(symbol, ws_tf, depth_level)
+                await asyncio.sleep(0.1)
 
     async def send_subscribe_msg(self, symbol: str, ws_tf: str, depth_level: int):
         kbar_msg = {
