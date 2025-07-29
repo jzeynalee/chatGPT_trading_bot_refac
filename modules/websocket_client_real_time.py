@@ -136,6 +136,8 @@ class WebSocketClient:
                 await self.prefill_all_data()
                 self.logger.info("🔔 Subscribing to all symbols and timeframes...")
                 await self.subscribe_all()
+                self.logger.info("✅ All subscriptions dispatched.")
+
 
                 # Keep connection alive
                 while self.is_running:
@@ -189,13 +191,36 @@ class WebSocketClient:
     async def subscribe_all(self) -> None:
         depth_level = self.config_mgr.get_depth_level()
         for symbol in self.symbols:
+            try:
+                depth_msg = {
+                    "action": "subscribe",
+                    "subscribe": "depth",
+                    "pair": symbol,
+                    "depth": depth_level
+                }
+                await self.ws.send(json.dumps(depth_msg))
+                self.logger.info("📡 Sent depth subscription → %s", symbol)
+            except Exception as e:
+                self.logger.error("❌ Failed to send depth subscription → %s: %s", symbol, e)
+
+            # Then kbar subscription for each timeframe
             for tf in self.timeframes:
                 ws_tf = self.timeframe_mapping.get(tf)
                 if ws_tf is None:
                     self.logger.warning("No WS code for timeframe %s – skipping", tf)
                     continue
-                await self.send_subscribe_msg(symbol, ws_tf, depth_level)
-                await asyncio.sleep(0.1)
+                try:
+                    kbar_msg = {
+                        "action": "subscribe",
+                        "subscribe": "kbar",
+                        "kbar": ws_tf,
+                        "pair": symbol
+                    }
+                    await self.ws.send(json.dumps(kbar_msg))
+                    self.logger.info("📡 Sent kbar subscription → %s @ %s", symbol, ws_tf)
+                except Exception as e:
+                    self.logger.error("❌ Failed to send kbar subscription → %s @ %s: %s", symbol, ws_tf, e)
+                await asyncio.sleep(0.1)  # small pacing delay
 
     async def send_subscribe_msg(self, symbol: str, ws_tf: str, depth_level: int):
         try:
