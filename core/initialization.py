@@ -96,7 +96,8 @@ def load_configuration(env_path: str = "config.env") -> Dict:
 def initialize_components(
     config: Dict,
     overrides: Optional[Dict[str, object]] = None,
-) -> Dict[str, object]:
+    logger: Optional[object] = None
+    ) -> Dict[str, object]:
     """
     Construct and wire together all runtime components (supports DI via overrides).
 
