@@ -66,7 +66,9 @@ class WebSocketClient:
         data_provider: Any = None,
     ):
         self.config_mgr = ConfigManager(config)
-        
+        self.url = self.config_mgr.get_ws_url()
+
+
         self.logger = logger if logger else setup_logger("WebSocketClient")
         self.logger.info("✅ WebSocketClient initialized with URL: %s", self.url)
         

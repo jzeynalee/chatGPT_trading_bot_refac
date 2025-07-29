@@ -110,7 +110,6 @@ def initialize_components(
     # 1) Logger    
     from utils.logger import setup_logger
     logger = overrides.get("logger") or setup_logger(__name__)
-    components = initialize_components(config=config, logger=logger)
 
     # 2) Strategy (TradePlanner) – handle possible 'equity' arg via try/except
     strategy = overrides.get("strategy")
