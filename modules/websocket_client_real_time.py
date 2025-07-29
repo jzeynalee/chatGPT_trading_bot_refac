@@ -134,6 +134,7 @@ class WebSocketClient:
 
                 # Prefill data and subscribe to symbols/timeframes
                 await self.prefill_all_data()
+                self.logger.info("🔔 Subscribing to all symbols and timeframes...")
                 await self.subscribe_all()
 
                 # Keep connection alive
@@ -197,21 +198,27 @@ class WebSocketClient:
                 await asyncio.sleep(0.1)
 
     async def send_subscribe_msg(self, symbol: str, ws_tf: str, depth_level: int):
-        kbar_msg = {
-            "action": "subscribe",
-            "subscribe": "kbar",
-            "kbar": ws_tf,
-            "pair": symbol
-        }
-        await self.ws.send(json.dumps(kbar_msg))
+        try:
+            kbar_msg = {
+                "action": "subscribe",
+                "subscribe": "kbar",
+                "kbar": ws_tf,
+                "pair": symbol
+            }
+            await self.ws.send(json.dumps(kbar_msg))
+            self.logger.info("📡 Sent kbar subscription → %s @ %s", symbol, ws_tf)
 
-        depth_msg = {
-            "action": "subscribe",
-            "subscribe": "depth",
-            "pair": symbol,
-            "depth": depth_level
-        }
-        await self.ws.send(json.dumps(depth_msg))
+            depth_msg = {
+                "action": "subscribe",
+                "subscribe": "depth",
+                "pair": symbol,
+                "depth": depth_level
+            }
+            await self.ws.send(json.dumps(depth_msg))
+            self.logger.info("📡 Sent depth subscription → %s", symbol)
+
+        except Exception as e:
+            self.logger.error("❌ Failed to subscribe %s @ %s → %s", symbol, ws_tf, e)
 
     async def prefill_data(self, symbol: str, timeframe: str) -> None:
         canonical_tf = normalize_tf(timeframe)
